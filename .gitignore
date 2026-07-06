@@ -1,0 +1,17 @@
+# Environment and build output
+.venv/
+__pycache__/
+*.pyc
+dist/
+build/
+*.spec
+
+# Fonts are fetched at first run from Fontshare (EULA forbids redistributing them)
+ui/fonts/*.woff2
+ui/fonts/FFL.txt
+
+# Local tooling and scratch
+.claude/
+docs/local/
+*.log
+selftest.json
