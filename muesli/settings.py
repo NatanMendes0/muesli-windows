@@ -28,7 +28,7 @@ DEFAULTS = {
     "stt": {
         "engine": "local",          # local | openai | groq
         "model": "base",            # tiny | base | small | medium | large-v3
-        "language": "",             # empty = auto detect
+        "language": "pt",           # pt | en | auto
         "compute_type": "int8",
     },
     "llm": {
@@ -36,6 +36,7 @@ DEFAULTS = {
         "ollama_url": "http://localhost:11434",
         "ollama_model": "",         # empty = first installed model
         "openai_key": "",
+        "openai_url": "",           # custom base URL or empty for api.openai.com
         "openai_model": "gpt-4o-mini",
         "groq_key": "",
         "groq_model": "llama-3.3-70b-versatile",
@@ -49,9 +50,9 @@ DEFAULTS = {
     },
     "consent": {
         "enabled": False,
-        "snippet": ("Quick heads up: I use an AI notepad that transcribes our call "
-                    "locally on my computer so I can stay present. Nothing is uploaded "
-                    "anywhere. Let me know if you would rather I turn it off."),
+        "snippet": ("Aviso rápido: utilizo um aplicativo local que transcreve a nossa chamada "
+                    "no meu próprio computador para eu me concentrar na conversa. Nenhum áudio "
+                    "é enviado para a nuvem. Me avise se preferir que eu desligue."),
     },
     "ui": {
         "default_template": "auto",

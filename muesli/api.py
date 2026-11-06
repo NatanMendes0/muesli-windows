@@ -242,17 +242,32 @@ class Api:
         m = db.get_meeting(meeting_id)
         if not m:
             return ""
-        date = time.strftime("%Y-%m-%d %H:%M", time.localtime(m["created_at"]))
+        date_str = time.strftime("%d/%m/%Y %H:%M", time.localtime(m["created_at"]))
+        date_iso = time.strftime("%Y-%m-%d", time.localtime(m["created_at"]))
         mins = int((m.get("duration_sec") or 0) // 60)
-        out = [f"# {m['title']}", f"*{date}* " + (f"({mins} min)" if mins else ""), ""]
+        duracao_str = f"{mins} min" if mins else "< 1 min"
+
+        out = [
+            "---",
+            "tipo: reuniao",
+            f"data: {date_iso}",
+            f'duracao: "{duracao_str}"',
+            "tags: [reuniao]",
+            "---",
+            "",
+            f"# 📋 {m['title']}",
+            f"> 📅 **Data:** {date_str} · ⏱️ **Duração:** {duracao_str}",
+            "---",
+            ""
+        ]
         if (m.get("summary_md") or "").strip():
-            out += [m["summary_md"].strip(), ""]
+            out += ["## 📌 Resumo & Pontos Chave", m["summary_md"].strip(), ""]
         if (m.get("notes_md") or "").strip():
-            out += ["## My raw notes", m["notes_md"].strip(), ""]
+            out += ["## ✍️ Anotações Rápidas", m["notes_md"].strip(), ""]
         if include_transcript:
             segs = db.get_segments(meeting_id)
             if segs:
-                out.append("## Transcript")
+                out.append("## 💬 Transcrição Completa")
                 out.append(enhance.format_transcript(segs))
         return "\n".join(out)
 

@@ -1,0 +1,59 @@
+name: Build Windows Release
+
+on:
+  push:
+    tags: ['v*']
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller>=6.0
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --noconfirm --onedir --windowed `
+            --name "Muesli" `
+            --icon "muesli.ico" `
+            --add-data "ui;ui" `
+            --collect-data "faster_whisper" `
+            --hidden-import "pystray._win32" `
+            --hidden-import "webview.platforms.winforms" `
+            --hidden-import "webview.platforms.edgechromium" `
+            launch.py
+
+      - name: Test build components
+        run: |
+          .\dist\Muesli\Muesli.exe --selftest
+        continue-on-error: true
+
+      - name: Package Artifact
+        run: |
+          Compress-Archive -Path dist\Muesli\* -DestinationPath Muesli-windows-x64.zip
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Muesli-windows-x64
+          path: Muesli-windows-x64.zip
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Muesli-windows-x64.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

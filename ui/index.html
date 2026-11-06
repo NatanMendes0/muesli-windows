@@ -19,7 +19,7 @@
       <span class="name">Muesli</span>
     </div>
 
-    <button class="btn-new" id="btnNew"><span class="dot"></span><span id="btnNewLabel">New note</span></button>
+    <button class="btn-new" id="btnNew"><span class="dot"></span><span id="btnNewLabel">Nova reunião</span></button>
 
     <div class="search-wrap">
       <span class="icon">
@@ -27,19 +27,19 @@
           <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.5-4.5"/>
         </svg>
       </span>
-      <input id="searchInput" type="text" placeholder="Search meetings" autocomplete="off">
+      <input id="searchInput" type="text" placeholder="Buscar reuniões" autocomplete="off">
     </div>
 
     <div class="meeting-list" id="meetingList"></div>
 
     <div class="sidebar-foot">
-      <div class="status-line" id="statusLine">Starting…</div>
+      <div class="status-line" id="statusLine">Pronto</div>
       <button class="foot-btn" id="btnSettings">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="3"/>
           <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55h.01a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/>
         </svg>
-        Settings
+        Configurações
       </button>
     </div>
   </aside>
@@ -49,19 +49,19 @@
 
     <!-- home / empty state -->
     <div class="home" id="homeView">
-      <h1 id="homeGreeting">Good morning</h1>
-      <p>Start a note when your meeting begins. Muesli listens to your mic and your
-         speakers, transcribes locally, and turns your rough notes into a clean summary.</p>
-      <button class="big-new" id="btnNewHome"><span class="dot"></span> Start a new note</button>
+      <h1 id="homeGreeting">Olá!</h1>
+      <p>Inicie uma anotação quando a sua reunião começar. O Muesli grava o seu microfone e o
+         áudio do sistema localmente, transcreve em tempo real e sintetiza suas notas em Markdown.</p>
+      <button class="big-new" id="btnNewHome"><span class="dot"></span> Iniciar nova reunião</button>
     </div>
 
     <!-- meeting view -->
     <div class="meeting-view" id="meetingView">
       <div class="note-header">
         <div class="title-row">
-          <input id="noteTitle" placeholder="Untitled meeting" autocomplete="off" spellcheck="false">
+          <input id="noteTitle" placeholder="Reunião sem título" autocomplete="off" spellcheck="false">
           <div class="rec-pill" id="recPill"><span class="dot"></span><span id="recTime">00:00</span></div>
-          <button class="btn-stop" id="btnStop">Stop</button>
+          <button class="btn-stop" id="btnStop">Parar</button>
         </div>
         <div class="meta-row">
           <span id="noteMeta"></span>
@@ -78,21 +78,22 @@
       <div class="panes">
         <section class="pane pane-notes">
           <div class="pane-head">
-            <button class="tab active" id="tabNotes">My notes</button>
-            <button class="tab" id="tabEnhanced">Enhanced</button>
+            <button class="tab active" id="tabNotes">Minhas Notas</button>
+            <button class="tab" id="tabEnhanced">Aprimorado (IA)</button>
             <span class="spacer"></span>
-            <button class="tool" id="btnCopySummary" title="Copy to clipboard">Copy</button>
-            <button class="tool" id="btnExport" title="Export as Markdown">Export .md</button>
+            <button class="tool" id="btnCopySummary" title="Copiar notas formatadas para colar no Obsidian">Copiar (Obsidian)</button>
+            <button class="tool" id="btnCopyAll" title="Copiar notas + transcrição completa">Copiar + Transcrição</button>
+            <button class="tool" id="btnExport" title="Exportar como arquivo Markdown (.md)">Exportar .md</button>
           </div>
-          <textarea id="notepad" placeholder="Jot rough notes here during the meeting. Bullets, keywords, half sentences, anything. Muesli expands them with the transcript when you hit Enhance." spellcheck="false"></textarea>
+          <textarea id="notepad" placeholder="Faça suas anotações rápidas aqui durante a reunião. Tópicos, palavras-chave, decisões... O Muesli expande tudo com a transcrição ao finalizar a gravação." spellcheck="false"></textarea>
           <div class="enhanced-body md" id="enhancedBody"></div>
         </section>
 
         <section class="pane pane-transcript" id="transcriptPane">
           <div class="pane-head">
-            <button class="tab active" id="tabTranscript">Transcript</button>
+            <button class="tab active" id="tabTranscript">Transcrição</button>
             <span class="spacer"></span>
-            <button class="tool" id="btnCollapseTr" title="Collapse">&#x276F;</button>
+            <button class="tool" id="btnCollapseTr" title="Recolher">&#x276F;</button>
           </div>
           <div class="transcript-body" id="transcriptBody">
             <div class="tr-status" id="trStatus"></div>
@@ -101,24 +102,24 @@
       </div>
 
       <div class="action-bar">
-        <select class="tpl-select" id="tplSelect" title="Note template"></select>
+        <select class="tpl-select" id="tplSelect" title="Modelo de Ata / Resumo"></select>
         <button class="btn-enhance" id="btnEnhance">
-          <span id="enhanceLabel">Enhance notes</span>
+          <span id="enhanceLabel">Aprimorar com IA</span>
         </button>
         <span style="flex:1"></span>
-        <button class="btn-plain danger" id="btnDelete">Delete</button>
+        <button class="btn-plain danger" id="btnDelete">Excluir</button>
       </div>
 
       <div class="chat-dock">
         <div class="chat-panel" id="chatPanel"></div>
         <div class="chat-input-row">
-          <span class="chat-scope" id="chatScope" title="Click to switch scope">This meeting</span>
-          <input id="chatInput" placeholder="Ask about this meeting, or ask for a follow-up email…" autocomplete="off">
+          <span class="chat-scope" id="chatScope" title="Clique para alternar escopo">Esta reunião</span>
+          <input id="chatInput" placeholder="Faça perguntas sobre a reunião ou peça um follow-up..." autocomplete="off">
           <span class="quick-actions">
-            <button class="qa" data-q="List all action items from this meeting with owners.">Action items</button>
-            <button class="qa" data-q="Draft a short follow-up email I can send to the other participants, covering what we agreed and next steps.">Follow-up email</button>
+            <button class="qa" data-q="Liste todas as ações e decisões desta reunião com responsáveis e prazos.">Plano de ação</button>
+            <button class="qa" data-q="Escreva um e-mail formal de follow-up resumindo os alinhamentos e próximos passos para os participantes.">Email de follow-up</button>
           </span>
-          <button class="btn-send" id="btnSend">Ask</button>
+          <button class="btn-send" id="btnSend">Enviar</button>
         </div>
       </div>
     </div>

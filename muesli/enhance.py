@@ -119,7 +119,7 @@ def _llm_available_uncached(cfg: dict) -> dict:
         if name == "anthropic" and cfg.get("anthropic_key"):
             out.update(provider="anthropic", detail=cfg.get("anthropic_model", ""))
             return out
-        if name == "openai" and cfg.get("openai_key"):
+        if name == "openai" and (cfg.get("openai_key") or cfg.get("openai_url")):
             out.update(provider="openai", detail=cfg.get("openai_model", ""))
             return out
         if name == "groq" and cfg.get("groq_key"):
@@ -151,10 +151,11 @@ def llm_complete(system: str, user: str):
             if name == "anthropic" and cfg.get("anthropic_key"):
                 return _call_anthropic(system, user, cfg["anthropic_key"],
                                        cfg.get("anthropic_model") or "claude-haiku-4-5-20251001"), "anthropic"
-            if name == "openai" and cfg.get("openai_key"):
+            if name == "openai" and (cfg.get("openai_key") or cfg.get("openai_url")):
+                url = cfg.get("openai_url") or "https://api.openai.com/v1/chat/completions"
                 return _call_openai_style(system, user,
-                                          "https://api.openai.com/v1/chat/completions",
-                                          cfg["openai_key"],
+                                          url,
+                                          cfg.get("openai_key") or "dummy-key",
                                           cfg.get("openai_model") or "gpt-4o-mini"), "openai"
             if name == "groq" and cfg.get("groq_key"):
                 return _call_openai_style(system, user,
@@ -206,19 +207,19 @@ def shrink_segments(segments: list, note_terms, max_chars: int) -> list:
 
 # ------------------------------------------------------------- LLM enhancement
 
-ENHANCE_SYSTEM = """You are an expert note taker for meetings. You receive the user's own rough
-notes plus a meeting transcript. Produce clean, structured meeting notes in Markdown.
+ENHANCE_SYSTEM = """Você é um especialista em atas e anotações executivas de reuniões.
+Você recebe as anotações rápidas do usuário mais a transcrição em tempo real da reunião.
+Produza anotações de reunião limpas, objetivas e estruturadas em Markdown, em português brasileiro.
 
-Rules:
-- The user's rough notes are anchors: every topic they jotted down must appear, expanded
-  with details from the transcript. If a note has no transcript match, keep it as written.
-- Add important things from the transcript the user did not write down.
-- Never invent facts, names, numbers or commitments that are not in the notes or transcript.
-- Be specific: names, numbers, dates, owners. Prefer short bullet points over prose.
-- Use exactly the section headings given, as Markdown H2 (##). Omit a section only when
-  there is truly nothing for it. Do not add other top-level sections.
-- Do not use em dashes. Write in plain, direct language.
-- Output only the Markdown notes, no preamble."""
+Regras:
+- As notas rápidas do usuário são âncoras essenciais: tudo o que foi anotado deve constar no documento, expandido com os detalhes da transcrição. Se algo anotado não tiver correspondência clara na transcrição, mantenha como foi escrito.
+- Extraia os tópicos mais importantes, o contexto técnico e as discussões relevantes.
+- Registre decisões e deliberações com clareza.
+- Ações e tarefas devem especificar responsáveis e prazos/momentos sempre que mencionados (use caixas de seleção `- [ ]`).
+- Nunca invente fatos, nomes, prazos ou números que não foram ditos na reunião.
+- Seja específico: cite nomes de pessoas, sistemas, ferramentas e prazos. Prefira tópicos (bullet points) objetivos em vez de longos blocos de texto.
+- Use exatamente os títulos de seção fornecidos como H2 (##) em Markdown. Omita uma seção apenas se realmente não houver nada referente a ela.
+- Não use travessões longos nem prefácios. Responda apenas com o Markdown gerado."""
 
 
 def enhance(meeting: dict, segments: list, template: dict):

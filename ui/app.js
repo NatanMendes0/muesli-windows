@@ -235,7 +235,7 @@ function addSegmentEl(s) {
   div.className = "seg";
   const mm = String(Math.floor(s.t0 / 60)).padStart(2, "0");
   const ss = String(Math.floor(s.t0 % 60)).padStart(2, "0");
-  const who = s.speaker === "Me" ? "Me" : s.speaker === "Them" ? "Them" : "·";
+  const who = s.speaker === "Me" ? "Eu" : s.speaker === "Them" ? "Outros" : "·";
   const cls = s.speaker === "Me" ? "me" : s.speaker === "Them" ? "them" : "them";
   div.innerHTML = `<span class="chip ${cls}">${who}</span>
     <span class="txt"><span class="t">${mm}:${ss}</span></span>`;
@@ -317,7 +317,7 @@ function stopPolling() {
 async function stopRecording() {
   if (!state.recording) return;
   const stoppedId = state.activeMeetingId;
-  $("btnStop").textContent = "Finishing…";
+  $("btnStop").textContent = "Finalizando…";
   $("btnStop").disabled = true;
   const res = await api().stop_meeting();
   if (res.ok) {
@@ -326,13 +326,18 @@ async function stopRecording() {
   state.recording = false;
   state.activeMeetingId = null;
   stopPolling();
-  $("btnStop").textContent = "Stop";
+  $("btnStop").textContent = "Parar";
   $("btnStop").disabled = false;
   setRecordingUi(false);
   refreshMeetings();
   // Only reload the view if the user is still looking at the stopped meeting.
-  if (state.current && state.current.id === stoppedId) await openMeeting(stoppedId);
-  toast("Recording stopped. Transcript finalized.");
+  if (state.current && state.current.id === stoppedId) {
+    await openMeeting(stoppedId);
+    toast("Gravação finalizada. Aprimorando notas com IA...");
+    await enhanceNow();
+  } else {
+    toast("Gravação finalizada. Transcrição salva.");
+  }
 }
 
 function waitJob(jobId) {
@@ -362,13 +367,13 @@ async function enhanceNow() {
   state.enhanceBusy = true;
   const btn = $("btnEnhance");
   btn.disabled = true;
-  $("enhanceLabel").innerHTML = 'Enhancing&hellip; <span class="spin"></span>';
+  $("enhanceLabel").innerHTML = 'Aprimorando&hellip; <span class="spin"></span>';
   await flushNotes();
   const res = await api().enhance_meeting(mid, $("tplSelect").value);
   const out = res.ok ? await waitJob(res.job_id) : null;
   state.enhanceBusy = false;
   btn.disabled = false;
-  $("enhanceLabel").textContent = "Enhance notes";
+  $("enhanceLabel").textContent = "Aprimorar com IA";
   if (out) {
     // Render only if the same meeting is still on screen; the summary is in
     // the DB either way and shows on next open.
@@ -378,9 +383,9 @@ async function enhanceNow() {
       renderEnhanced(out.summary_md, out.provider);
       selectTab("enhanced");
     }
-    toast("Notes enhanced");
+    toast("Notas aprimoradas com sucesso!");
   } else {
-    toast("Enhance failed. Check Settings > AI models.", 4000);
+    toast("Falha no aprimoramento. Verifique as Configurações de IA.", 4000);
   }
 }
 
@@ -691,7 +696,12 @@ function wireEvents() {
   $("btnCopySummary").addEventListener("click", async () => {
     await flushNotes();
     const res = await api().copy_markdown(state.current.id, false);
-    toast(res.ok ? "Copied notes to clipboard" : "Copy failed");
+    toast(res.ok ? "Copiado para Obsidian!" : "Falha ao copiar");
+  });
+  $("btnCopyAll")?.addEventListener("click", async () => {
+    await flushNotes();
+    const res = await api().copy_markdown(state.current.id, true);
+    toast(res.ok ? "Copiado com transcrição completa!" : "Falha ao copiar");
   });
   // chat: meeting scope (the pill can widen it to all meetings)
   const meetingScope = () =>
