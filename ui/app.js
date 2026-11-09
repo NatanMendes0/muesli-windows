@@ -21,7 +21,17 @@ const state = {
   searchSeq: 0,
 };
 
-function api() { return window.pywebview.api; }
+function isApiReady() {
+  return typeof window.pywebview !== "undefined" && typeof window.pywebview.api !== "undefined";
+}
+
+function api() {
+  if (!isApiReady()) {
+    toast("Conectando ao backend... aguarde um instante.", 3000);
+    throw new Error("Backend API not ready yet");
+  }
+  return window.pywebview.api;
+}
 
 function toast(msg, ms = 2600) {
   const el = $("toast");
@@ -250,13 +260,20 @@ async function startNewNote() {
     if (state.activeMeetingId) openMeeting(state.activeMeetingId);
     return;
   }
+  if (!isApiReady()) {
+    toast("O Muesli ainda está inicializando o backend. Aguarde alguns segundos...", 3500);
+    return;
+  }
   if (state.startingNote) return; // double click guard
   state.startingNote = true;
+  $("btnNew").disabled = true;
+  $("btnNewHome").disabled = true;
+  toast("Iniciando gravação...");
   try {
     const tpl = (state.settings && state.settings.ui && state.settings.ui.default_template) || "auto";
     const res = await api().start_meeting("", tpl);
     if (!res.ok) {
-      toast(res.error || "Could not start recording");
+      toast(res.error || "Não foi possível iniciar a gravação", 4000);
       if (res.meeting_id) { await refreshMeetings(); openMeeting(res.meeting_id); }
       return;
     }
@@ -267,8 +284,14 @@ async function startNewNote() {
     await openMeeting(res.meeting_id);
     if (res.warnings && res.warnings.length) showWarn(res.warnings.join(" "));
     startPolling();
+    toast("Gravação em andamento!");
+  } catch (err) {
+    console.error("Erro ao iniciar reunião:", err);
+    toast("Erro ao iniciar: " + (err.message || err), 4000);
   } finally {
     state.startingNote = false;
+    $("btnNew").disabled = false;
+    $("btnNewHome").disabled = false;
   }
 }
 window.trayNewNote = startNewNote;
@@ -447,56 +470,66 @@ async function flushNotes() {
 
 /* ----------------------------------------------------------- settings */
 async function openSettings() {
-  const s = await api().get_settings();
-  state.settings = s;
-  // audio devices
-  const devs = await api().list_audio_devices();
-  const fill = (sel, items, chosen) => {
-    sel.innerHTML = '<option value="">System default</option>';
-    for (const d of items) {
-      const o = document.createElement("option");
-      o.value = d.index;
-      o.textContent = d.name + (d.default ? "  (default)" : "");
-      sel.appendChild(o);
-    }
-    sel.value = chosen === null || chosen === undefined ? "" : String(chosen);
-    if (sel.selectedIndex < 0) sel.value = "";
-  };
-  fill($("setMic"), devs.mics || [], s.audio.mic_device_index);
-  fill($("setLoop"), devs.loopbacks || [], s.audio.loopback_device_index);
-  if (!devs.ok) toast("Audio backend problem: " + devs.error, 5000);
-  $("setRetain").checked = !!s.audio.retain_audio;
-  // stt
-  $("setSttEngine").value = s.stt.engine;
-  $("setSttModel").value = s.stt.model;
-  $("setSttLang").value = s.stt.language || "";
-  // ai
-  $("setLlmProvider").value = s.llm.provider;
-  $("setOllamaUrl").value = s.llm.ollama_url;
-  const models = await api().list_ollama_models();
-  const om = $("setOllamaModel");
-  om.innerHTML = '<option value="">First available</option>';
-  for (const m of models) {
-    const o = document.createElement("option");
-    o.value = m; o.textContent = m;
-    om.appendChild(o);
+  if (!isApiReady()) {
+    toast("Aguardando inicialização do backend para abrir configurações...", 3500);
+    return;
   }
-  om.value = s.llm.ollama_model || "";
-  $("ollamaHint").textContent = models.length
-    ? `Ollama is running with ${models.length} model(s).`
-    : "Ollama not detected. Install it from ollama.com for free local AI.";
-  $("setKeyAnthropic").value = s.llm.anthropic_key;
-  $("setKeyOpenai").value = s.llm.openai_key;
-  $("setKeyGroq").value = s.llm.groq_key;
-  $("setModelAnthropic").value = s.llm.anthropic_model;
-  $("setModelOpenai").value = s.llm.openai_model;
-  $("setModelGroq").value = s.llm.groq_model;
-  // general
-  $("setStartup").checked = !!s.launch_at_startup;
-  $("setConsent").checked = !!s.consent.enabled;
-  $("setConsentText").value = s.consent.snippet;
-  renderTplManager();
   $("settingsModal").classList.add("visible");
+  toast("Carregando configurações...", 1200);
+  try {
+    const s = await api().get_settings();
+    state.settings = s;
+    // audio devices
+    const devs = await api().list_audio_devices();
+    const fill = (sel, items, chosen) => {
+      sel.innerHTML = '<option value="">System default</option>';
+      for (const d of items) {
+        const o = document.createElement("option");
+        o.value = d.index;
+        o.textContent = d.name + (d.default ? "  (default)" : "");
+        sel.appendChild(o);
+      }
+      sel.value = chosen === null || chosen === undefined ? "" : String(chosen);
+      if (sel.selectedIndex < 0) sel.value = "";
+    };
+    fill($("setMic"), devs.mics || [], s.audio.mic_device_index);
+    fill($("setLoop"), devs.loopbacks || [], s.audio.loopback_device_index);
+    if (!devs.ok) toast("Problema de áudio: " + devs.error, 5000);
+    $("setRetain").checked = !!s.audio.retain_audio;
+    // stt
+    $("setSttEngine").value = s.stt.engine;
+    $("setSttModel").value = s.stt.model;
+    $("setSttLang").value = s.stt.language || "";
+    // ai
+    $("setLlmProvider").value = s.llm.provider;
+    $("setOllamaUrl").value = s.llm.ollama_url;
+    const models = await api().list_ollama_models();
+    const om = $("setOllamaModel");
+    om.innerHTML = '<option value="">First available</option>';
+    for (const m of models) {
+      const o = document.createElement("option");
+      o.value = m; o.textContent = m;
+      om.appendChild(o);
+    }
+    om.value = s.llm.ollama_model || "";
+    $("ollamaHint").textContent = models.length
+      ? `Ollama está ativo com ${models.length} modelo(s).`
+      : "Ollama não detectado. Instale de ollama.com para IA local gratuita.";
+    $("setKeyAnthropic").value = s.llm.anthropic_key;
+    $("setKeyOpenai").value = s.llm.openai_key;
+    $("setKeyGroq").value = s.llm.groq_key;
+    $("setModelAnthropic").value = s.llm.anthropic_model;
+    $("setModelOpenai").value = s.llm.openai_model;
+    $("setModelGroq").value = s.llm.groq_model;
+    // general
+    $("setStartup").checked = !!s.launch_at_startup;
+    $("setConsent").checked = !!s.consent.enabled;
+    $("setConsentText").value = s.consent.snippet;
+    renderTplManager();
+  } catch (err) {
+    console.error("Erro ao carregar configurações:", err);
+    toast("Erro ao carregar configurações: " + (err.message || err), 4000);
+  }
 }
 
 async function saveSettings() {
@@ -688,20 +721,39 @@ function wireEvents() {
     else refreshMeetings();
   });
   $("btnExport").addEventListener("click", async () => {
-    await flushNotes();
-    const res = await api().export_markdown(state.current.id, true);
-    if (res.ok) toast("Exported to " + res.path);
-    else if (res.error) toast("Export failed: " + res.error);
+    if (!isApiReady()) { toast("Aguarde a conexão com o backend...", 3000); return; }
+    if (!state.current) { toast("Nenhuma reunião selecionada", 2500); return; }
+    toast("Abrindo diálogo para salvar...", 1500);
+    try {
+      await flushNotes();
+      const res = await api().export_markdown(state.current.id, true);
+      if (res.ok) toast("Exportado com sucesso para " + res.path, 4000);
+      else if (res.error) toast("Falha ao exportar: " + res.error, 4000);
+    } catch (e) {
+      toast("Erro ao exportar: " + (e.message || e), 4000);
+    }
   });
   $("btnCopySummary").addEventListener("click", async () => {
-    await flushNotes();
-    const res = await api().copy_markdown(state.current.id, false);
-    toast(res.ok ? "Copiado para Obsidian!" : "Falha ao copiar");
+    if (!isApiReady()) { toast("Aguarde a conexão com o backend...", 3000); return; }
+    if (!state.current) { toast("Nenhuma reunião selecionada", 2500); return; }
+    try {
+      await flushNotes();
+      const res = await api().copy_markdown(state.current.id, false);
+      toast(res.ok ? "Copiado para Obsidian!" : "Falha ao copiar");
+    } catch (e) {
+      toast("Erro ao copiar: " + (e.message || e), 4000);
+    }
   });
   $("btnCopyAll")?.addEventListener("click", async () => {
-    await flushNotes();
-    const res = await api().copy_markdown(state.current.id, true);
-    toast(res.ok ? "Copiado com transcrição completa!" : "Falha ao copiar");
+    if (!isApiReady()) { toast("Aguarde a conexão com o backend...", 3000); return; }
+    if (!state.current) { toast("Nenhuma reunião selecionada", 2500); return; }
+    try {
+      await flushNotes();
+      const res = await api().copy_markdown(state.current.id, true);
+      toast(res.ok ? "Copiado com transcrição completa!" : "Falha ao copiar");
+    } catch (e) {
+      toast("Erro ao copiar: " + (e.message || e), 4000);
+    }
   });
   // chat: meeting scope (the pill can widen it to all meetings)
   const meetingScope = () =>
@@ -729,10 +781,19 @@ function wireEvents() {
   $("btnCancelSettings").addEventListener("click", () => $("settingsModal").classList.remove("visible"));
   $("btnSaveSettings").addEventListener("click", saveSettings);
   $("btnRefreshDevices").addEventListener("click", openSettings);
-  $("btnOpenData").addEventListener("click", () => api().open_data_dir());
+  $("btnOpenData").addEventListener("click", async () => {
+    if (!isApiReady()) { toast("Aguarde a conexão com o backend...", 3000); return; }
+    try {
+      await api().open_data_dir();
+      toast("Pasta de dados aberta no Explorer!");
+    } catch (e) {
+      toast("Erro ao abrir pasta: " + (e.message || e), 4000);
+    }
+  });
   $("btnCopyConsent").addEventListener("click", async () => {
+    if (!isApiReady()) { toast("Aguarde a conexão com o backend...", 3000); return; }
     await api().copy_text($("setConsentText").value);
-    toast("Snippet copied");
+    toast("Texto copiado para a área de transferência!");
   });
   document.querySelectorAll(".modal-tabs .tab").forEach(t => t.addEventListener("click", () => {
     document.querySelectorAll(".modal-tabs .tab").forEach(x => x.classList.remove("active"));
@@ -746,21 +807,67 @@ function wireEvents() {
   $("btnSaveTpl").addEventListener("click", saveTpl);
 }
 
-async function boot() {
-  if (state.booted) return; // pywebviewready and the fallback can both fire
-  state.booted = true;
-  const h = new Date().getHours();
-  $("homeGreeting").textContent = h < 5 ? "Working late" : h < 12 ? "Good morning" :
-    h < 18 ? "Good afternoon" : "Good evening";
-  wireEvents();
-  await loadTemplates();
-  state.settings = await api().get_settings();
-  await refreshMeetings();
-  try { renderChat($("homeChatPanel"), await api().get_global_chat()); } catch (e) {}
-  await refreshStatus();
-  setInterval(refreshStatus, 5000);
+let bootRetryCount = 0;
+const MAX_BOOT_RETRIES = 120; // 120 * 500ms = 60 segundos (1 minuto max)
+
+function scheduleBootRetry() {
+  if (state.booted) return;
+  if (isApiReady()) {
+    boot();
+    return;
+  }
+  bootRetryCount++;
+  if (bootRetryCount <= MAX_BOOT_RETRIES) {
+    if (bootRetryCount % 6 === 0) { // a cada 3 segundos
+      const secLeft = Math.round((MAX_BOOT_RETRIES - bootRetryCount) * 0.5);
+      const el = $("statusLine");
+      if (el) el.innerHTML = `Iniciando backend (${secLeft}s)...`;
+    }
+    setTimeout(scheduleBootRetry, 500);
+  } else {
+    const el = $("statusLine");
+    if (el) el.innerHTML = `<span style="color:#d9534f;font-weight:600">Backend não respondeu (timeout 1 min)</span>`;
+    toast("O backend não respondeu após 1 minuto. Verifique se o WebView2 está instalado ou se a pasta foi extraída do ZIP.", 8000);
+  }
 }
 
-window.addEventListener("pywebviewready", boot);
-// Fallback if the event fired before this script attached.
-setTimeout(() => { if (window.pywebview) boot(); }, 1200);
+async function boot() {
+  if (state.booted) return;
+  state.booted = true;
+
+  const el = $("statusLine");
+  if (el) el.textContent = "Conectado. Carregando dados...";
+
+  const h = new Date().getHours();
+  if ($("homeGreeting")) {
+    $("homeGreeting").textContent = h < 5 ? "Boa noite" : h < 12 ? "Bom dia" :
+      h < 18 ? "Boa tarde" : "Boa noite";
+  }
+
+  try {
+    await loadTemplates();
+    state.settings = await api().get_settings();
+    await refreshMeetings();
+    try { renderChat($("homeChatPanel"), await api().get_global_chat()); } catch (e) {}
+    await refreshStatus();
+    setInterval(refreshStatus, 5000);
+    toast("Muesli pronto para uso!", 2000);
+  } catch (err) {
+    console.error("Erro durante inicialização:", err);
+    toast("Aviso ao carregar dados: " + (err.message || err), 4000);
+    try { await refreshStatus(); } catch (e) {}
+  }
+}
+
+// Conectar todos os eventos imediatamente para a interface nunca ficar inerte
+wireEvents();
+
+window.addEventListener("pywebviewready", () => {
+  if (!state.booted) boot();
+});
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", scheduleBootRetry);
+} else {
+  scheduleBootRetry();
+}
