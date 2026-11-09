@@ -38,6 +38,10 @@ jobs:
             --hidden-import "webview.platforms.edgechromium" `
             launch.py
 
+      - name: Copy runtime config
+        run: |
+          Copy-Item Muesli.exe.config dist\Muesli\Muesli.exe.config
+
       - name: Test build components
         run: |
           .\dist\Muesli\Muesli.exe --selftest
