@@ -22,7 +22,10 @@ const state = {
 };
 
 function isApiReady() {
-  return typeof window.pywebview !== "undefined" && typeof window.pywebview.api !== "undefined";
+  return typeof window.pywebview !== "undefined" &&
+         typeof window.pywebview.api !== "undefined" &&
+         typeof window.pywebview.api.get_templates === "function" &&
+         typeof window.pywebview.api.get_settings === "function";
 }
 
 function api() {
@@ -808,7 +811,7 @@ function wireEvents() {
 }
 
 let bootRetryCount = 0;
-const MAX_BOOT_RETRIES = 120; // 120 * 500ms = 60 segundos (1 minuto max)
+const MAX_BOOT_RETRIES = 240; // 240 * 250ms = 60 segundos (1 minuto max)
 
 function scheduleBootRetry() {
   if (state.booted) return;
@@ -818,12 +821,12 @@ function scheduleBootRetry() {
   }
   bootRetryCount++;
   if (bootRetryCount <= MAX_BOOT_RETRIES) {
-    if (bootRetryCount % 6 === 0) { // a cada 3 segundos
-      const secLeft = Math.round((MAX_BOOT_RETRIES - bootRetryCount) * 0.5);
+    if (bootRetryCount % 8 === 0) { // a cada 2 segundos
+      const secLeft = Math.round((MAX_BOOT_RETRIES - bootRetryCount) * 0.25);
       const el = $("statusLine");
       if (el) el.innerHTML = `Iniciando backend (${secLeft}s)...`;
     }
-    setTimeout(scheduleBootRetry, 500);
+    setTimeout(scheduleBootRetry, 250);
   } else {
     const el = $("statusLine");
     if (el) el.innerHTML = `<span style="color:#d9534f;font-weight:600">Backend não respondeu (timeout 1 min)</span>`;
@@ -833,6 +836,10 @@ function scheduleBootRetry() {
 
 async function boot() {
   if (state.booted) return;
+  if (!isApiReady()) {
+    scheduleBootRetry();
+    return;
+  }
   state.booted = true;
 
   const el = $("statusLine");
@@ -854,8 +861,9 @@ async function boot() {
     toast("Muesli pronto para uso!", 2000);
   } catch (err) {
     console.error("Erro durante inicialização:", err);
+    state.booted = false; // permite tentar novamente se falhou
     toast("Aviso ao carregar dados: " + (err.message || err), 4000);
-    try { await refreshStatus(); } catch (e) {}
+    setTimeout(scheduleBootRetry, 500);
   }
 }
 

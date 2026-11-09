@@ -48,9 +48,9 @@ class App:
 
     def _quit(self, *_):
         self.quitting = True
-        if self.api.session is not None:
+        if self.api._session is not None:
             try:
-                self.api.session.stop()
+                self.api._session.stop()
             except Exception:
                 pass
         if self.tray is not None:
@@ -89,15 +89,15 @@ class App:
             APP_NAME, os.path.join(UI_DIR, "index.html"), js_api=self.api,
             width=1320, height=880, min_size=(980, 640),
             background_color="#F7F3EA")
-        self.api.window = self.window
+        self.api._window = self.window
         self.window.events.closing += self._on_closing
         self._start_tray()
         webview.start(debug=self.debug, private_mode=False)
         # Window destroyed: make sure everything winds down.
         self.quitting = True
-        if self.api.session is not None:
+        if self.api._session is not None:
             try:
-                self.api.session.stop()
+                self.api._session.stop()
             except Exception:
                 pass
         if self.tray is not None:

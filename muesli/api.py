@@ -14,22 +14,22 @@ from . import APP_VERSION
 
 class Api:
     def __init__(self):
-        self.session = None       # active MeetingSession
-        self.jobs = {}            # job_id -> {state, result, error, kind, done_at}
-        self.window = None        # set by app.py
+        self._session = None       # active MeetingSession
+        self._jobs = {}            # job_id -> {state, result, error, kind, done_at}
+        self._window = None        # set by app.py
         self._start_lock = threading.Lock()
 
     def _new_job(self, kind):
         job_id = uuid.uuid4().hex[:12]
-        self.jobs[job_id] = {"state": "running", "kind": kind,
-                             "result": None, "error": "", "done_at": None}
+        self._jobs[job_id] = {"state": "running", "kind": kind,
+                              "result": None, "error": "", "done_at": None}
         return job_id
 
     def _prune_jobs(self):
         now = time.time()
-        for jid in [j for j, job in self.jobs.items()
+        for jid in [j for j, job in self._jobs.items()
                     if job["done_at"] and now - job["done_at"] > 600]:
-            self.jobs.pop(jid, None)
+            self._jobs.pop(jid, None)
 
     # ------------------------------------------------------------- app state
 
@@ -38,8 +38,8 @@ class Api:
         llm = enhance.llm_available()
         return {
             "version": APP_VERSION,
-            "recording": bool(self.session and self.session.status == "recording"),
-            "active_meeting_id": self.session.meeting_id if self.session else None,
+            "recording": bool(self._session and self._session.status == "recording"),
+            "active_meeting_id": self._session.meeting_id if self._session else None,
             "llm": llm,
             "stt_model": stt.model_status(),
             "audio_backend_ok": audio.PYAUDIO_OK,
@@ -53,23 +53,23 @@ class Api:
 
     def start_meeting(self, title, template_id):
         with self._start_lock:
-            if self.session and self.session.status in ("starting", "recording"):
+            if self._session and self._session.status in ("starting", "recording"):
                 return {"ok": False, "error": "A recording is already running."}
             meeting_id = db.create_meeting(title or "Untitled meeting", template_id)
             try:
                 sess = session.MeetingSession(meeting_id)
                 sess.start()
-                self.session = sess
+                self._session = sess
             except Exception as e:
                 db.end_meeting(meeting_id, 0)
                 return {"ok": False, "error": str(e), "meeting_id": meeting_id}
             return {"ok": True, "meeting_id": meeting_id,
-                    "warnings": self.session.capture.warnings}
+                    "warnings": self._session.capture.warnings}
 
     def stop_meeting(self):
-        if not self.session:
+        if not self._session:
             return {"ok": False, "error": "No active recording."}
-        sess = self.session
+        sess = self._session
         job_id = self._new_job("stop")
 
         def worker():
@@ -80,22 +80,22 @@ class Api:
                     guess = enhance.suggest_title(db.get_segments(sess.meeting_id))
                     if guess:
                         db.update_meeting(sess.meeting_id, title=guess)
-                self.jobs[job_id].update(state="done", done_at=time.time(),
-                                         result={"meeting_id": sess.meeting_id,
-                                                 "duration": duration})
+                self._jobs[job_id].update(state="done", done_at=time.time(),
+                                          result={"meeting_id": sess.meeting_id,
+                                                  "duration": duration})
             except Exception as e:
-                self.jobs[job_id].update(state="error", error=str(e), done_at=time.time())
+                self._jobs[job_id].update(state="error", error=str(e), done_at=time.time())
             finally:
-                if self.session is sess:
-                    self.session = None
+                if self._session is sess:
+                    self._session = None
 
         threading.Thread(target=worker, daemon=True).start()
         return {"ok": True, "job_id": job_id}
 
-    def poll_session(self, since):
-        if not self.session:
-            return {"status": "none", "segments": [], "total": since}
-        return self.session.poll(int(since or 0))
+    def poll_session(self, since: int):
+        if not self._session:
+            return {"status": "none"}
+        return self._session.poll(int(since or 0))
 
     def list_meetings(self, search):
         return db.list_meetings(search or "")
@@ -145,11 +145,11 @@ class Api:
                 md, provider = enhance.enhance(m, segs, tpl)
                 db.update_meeting(meeting_id, summary_md=md, summary_provider=provider,
                                   template_id=tpl["id"])
-                self.jobs[job_id].update(state="done", done_at=time.time(),
+                self._jobs[job_id].update(state="done", done_at=time.time(),
                                          result={"summary_md": md, "provider": provider,
                                                  "meeting_id": meeting_id})
             except Exception as e:
-                self.jobs[job_id].update(state="error", error=str(e), done_at=time.time())
+                self._jobs[job_id].update(state="error", error=str(e), done_at=time.time())
 
         threading.Thread(target=worker, daemon=True).start()
         return {"ok": True, "job_id": job_id}
@@ -164,9 +164,9 @@ class Api:
             try:
                 res = chatlogic.answer(question, mid)
                 res["meeting_id"] = mid
-                self.jobs[job_id].update(state="done", result=res, done_at=time.time())
+                self._jobs[job_id].update(state="done", result=res, done_at=time.time())
             except Exception as e:
-                self.jobs[job_id].update(state="error", error=str(e), done_at=time.time())
+                self._jobs[job_id].update(state="error", error=str(e), done_at=time.time())
 
         threading.Thread(target=worker, daemon=True).start()
         return {"ok": True, "job_id": job_id}
@@ -176,7 +176,7 @@ class Api:
 
     def job_status(self, job_id):
         self._prune_jobs()
-        job = self.jobs.get(job_id)
+        job = self._jobs.get(job_id)
         if not job:
             return {"state": "unknown"}
         return job
@@ -211,7 +211,7 @@ class Api:
                        if c.isalnum() or c in " -_").strip() or "meeting"
         try:
             import webview
-            path = self.window.create_file_dialog(
+            path = self._window.create_file_dialog(
                 webview.SAVE_DIALOG, save_filename=f"{safe}.md",
                 file_types=("Markdown (*.md)",))
         except Exception as e:
