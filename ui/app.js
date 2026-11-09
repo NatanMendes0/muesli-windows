@@ -192,16 +192,16 @@ function setRecordingUi(on) {
   $("recPill").classList.toggle("visible", on);
   $("btnStop").classList.toggle("visible", on);
   $("meters").style.display = on ? "flex" : "none";
-  $("btnNewLabel").textContent = state.recording ? "Recording…" : "New note";
+  $("btnNewLabel").textContent = state.recording ? "Gravando…" : "Nova reunião";
   $("btnNew").classList.toggle("recording", state.recording);
   const cb = $("consentBanner");
   if (on && state.settings && state.settings.consent && state.settings.consent.enabled) {
-    cb.innerHTML = "Consent reminder: let people know you are using an AI notepad. " +
-      '<span class="copy-link" id="consentCopy">Copy snippet</span>';
+    cb.innerHTML = "Lembrete de consentimento: informe aos participantes que você está utilizando um assistente de transcrição. " +
+      '<span class="copy-link" id="consentCopy">Copiar aviso</span>';
     cb.classList.add("visible");
     $("consentCopy").addEventListener("click", async () => {
       await api().copy_text(state.settings.consent.snippet);
-      toast("Consent snippet copied");
+      toast("Aviso de consentimento copiado!");
     });
   } else {
     cb.classList.remove("visible");
@@ -234,13 +234,13 @@ async function selectTab(which) {
 function renderEnhanced(md, provider) {
   const body = $("enhancedBody");
   if (!md) {
-    body.innerHTML = `<div class="enhance-empty">No enhanced notes yet.<br>
-      Pick a template below and hit <b>Enhance notes</b> after the meeting.</div>`;
+    body.innerHTML = `<div class="enhance-empty">Nenhum resumo gerado ainda.<br>
+      Após a reunião, clique em <b>Aprimorar com IA</b> ou use a aba <b>Prompt Copilot</b>.</div>`;
     return;
   }
-  const provNames = { ollama: "local AI (Ollama)", extractive: "built-in summarizer",
-                      anthropic: "Anthropic", openai: "OpenAI", groq: "Groq" };
-  body.innerHTML = `<div class="provider-tag">Generated with ${provNames[provider] || provider || "AI"}</div>` +
+  const provNames = { ollama: "IA Local (Ollama)", extractive: "sumarizador integrado (offline)",
+                      anthropic: "Anthropic (Claude)", openai: "OpenAI (ChatGPT)", groq: "Groq" };
+  body.innerHTML = `<div class="provider-tag">Gerado com ${provNames[provider] || provider || "IA"}</div>` +
                    renderMd(md);
 }
 
@@ -252,7 +252,7 @@ function renderTranscript(segments) {
   if (!segments.length) {
     $("trStatus").textContent = state.recording && state.current &&
       state.current.id === state.activeMeetingId
-      ? "Listening…" : "No transcript captured for this meeting.";
+      ? "Ouvindo áudio em tempo real…" : "Nenhuma fala capturada nesta reunião.";
   }
   body.scrollTop = body.scrollHeight;
 }
@@ -346,7 +346,7 @@ function startPolling() {
       if (tr) {
         if (s.model && s.model.state === "loading") tr.textContent = s.model.detail + "…";
         else if (s.detail) tr.textContent = s.detail;
-        else if (state.segCount === 0) tr.textContent = "Listening…";
+        else if (state.segCount === 0) tr.textContent = "Ouvindo áudio em tempo real…";
         else tr.textContent = "";
       }
       if (s.warnings && s.warnings.length) showWarn(s.warnings.join(" "));
@@ -548,6 +548,10 @@ async function openSettings() {
     $("setStartup").checked = !!s.launch_at_startup;
     $("setConsent").checked = !!s.consent.enabled;
     $("setConsentText").value = s.consent.snippet;
+    if ($("updateCurrentVer")) {
+      const v = (state.settingsState && state.settingsState.version) || "1.1.0";
+      $("updateCurrentVer").textContent = "Versão instalada: v" + v;
+    }
     renderTplManager();
   } catch (err) {
     console.error("Erro ao carregar configurações:", err);
@@ -586,7 +590,7 @@ async function saveSettings() {
   };
   await api().save_settings(patch);
   $("settingsModal").classList.remove("visible");
-  toast("Settings saved");
+  toast("Configurações salvas com sucesso!");
   refreshStatus();
   state.settings = await api().get_settings();
 }
@@ -616,13 +620,14 @@ function renderTplManager() {
     const row = document.createElement("div");
     row.className = "tpl-row";
     row.innerHTML = `<span class="nm"></span><span class="ds"></span>` +
-      (t.builtin ? '<span class="builtin-tag">built-in</span>'
-                 : '<button class="edit">Edit</button><button class="del">Delete</button>');
+      (t.builtin ? '<span class="builtin-tag">integrado</span>'
+                 : '<button class="edit">Editar</button><button class="del">Excluir</button>');
     row.querySelector(".nm").textContent = t.name;
     row.querySelector(".ds").textContent = t.description || t.sections.map(s => s.title).join(", ");
     if (!t.builtin) {
       row.querySelector(".edit").addEventListener("click", () => openTplEditor(t));
       row.querySelector(".del").addEventListener("click", async () => {
+        if (!confirm(`Deseja excluir o modelo "${t.name}"?`)) return;
         await api().delete_template(t.id);
         await loadTemplates();
         renderTplManager();
@@ -638,7 +643,7 @@ function openTplEditor(tpl) {
   $("tplName").value = tpl ? tpl.name : "";
   $("tplDesc").value = tpl ? tpl.description || "" : "";
   $("tplSections").innerHTML = "";
-  const secs = tpl ? tpl.sections : [{ title: "Summary", hint: "" }, { title: "Action items", hint: "" }];
+  const secs = tpl ? tpl.sections : [{ title: "Resumo", hint: "" }, { title: "Plano de Ação", hint: "" }];
   for (const s of secs) addSectionRow(s.title, s.hint || "");
 }
 
@@ -662,11 +667,11 @@ async function saveTpl() {
   const res = await api().save_template({
     id: editingTpl, name: $("tplName").value, description: $("tplDesc").value, sections,
   });
-  if (!res.ok) return toast(res.error || "Could not save template");
+  if (!res.ok) return toast(res.error || "Não foi possível salvar o modelo");
   $("tplEditor").style.display = "none";
   await loadTemplates();
   renderTplManager();
-  toast("Template saved");
+  toast("Modelo de nota salvo com sucesso!");
 }
 
 /* -------------------------------------------------------- status line */
@@ -691,12 +696,12 @@ async function refreshStatus() {
     injectFonts(st.font_faces);
     const bits = [];
     // escapeHtml on provider/model strings: they come from user settings.
-    if (st.llm.provider) bits.push(`AI: <b>${escapeHtml(st.llm.provider)}</b> (${escapeHtml(st.llm.detail || "")})`);
-    else bits.push("AI: built-in summarizer only");
-    if (st.stt_model.state === "loading") bits.push("Whisper: loading…");
-    else if (st.stt_model.state === "error") bits.push("Whisper: error");
-    else bits.push(`Whisper: ${escapeHtml(st.stt_model.name || "ready")}`);
-    if (!st.audio_backend_ok) bits.push("Audio backend failed");
+    if (st.llm.provider) bits.push(`IA: <b>${escapeHtml(st.llm.provider)}</b> (${escapeHtml(st.llm.detail || "")})`);
+    else bits.push("IA: sumarizador integrado (offline)");
+    if (st.stt_model.state === "loading") bits.push("Whisper: carregando modelo…");
+    else if (st.stt_model.state === "error") bits.push("Whisper: erro no modelo");
+    else bits.push(`Whisper: ${escapeHtml(st.stt_model.name || "pronto")}`);
+    if (!st.audio_backend_ok) bits.push("Aviso: dispositivo de áudio indisponível");
     $("statusLine").innerHTML = bits.join("<br>");
     // resume live session state after a UI reload
     if (st.recording && !state.recording) {
@@ -738,7 +743,7 @@ function wireEvents() {
   $("btnDelete").addEventListener("click", async () => {
     if (!state.current) return;
     const doomedId = state.current.id; // pin it: awaits below can change the view
-    if (!confirm("Delete this meeting, its transcript and notes?")) return;
+    if (!confirm("Deseja realmente excluir esta reunião, sua transcrição e anotações?")) return;
     if (doomedId === state.activeMeetingId && state.recording) await stopRecording();
     await api().delete_meeting(doomedId);
     if (state.current && state.current.id === doomedId) showHome();
@@ -846,6 +851,106 @@ function wireEvents() {
   $("btnAddSection").addEventListener("click", () => addSectionRow("", ""));
   $("btnCancelTpl").addEventListener("click", () => $("tplEditor").style.display = "none");
   $("btnSaveTpl").addEventListener("click", saveTpl);
+  $("btnCheckUpdatesNow")?.addEventListener("click", () => checkUpdatesUi(true));
+  $("btnDownloadUpdate")?.addEventListener("click", startDownloadUpdate);
+  $("btnOpenUpdateGithub")?.addEventListener("click", () => {
+    if (updateData && updateData.html_url) {
+      api().open_external_url(updateData.html_url);
+    } else {
+      api().open_external_url("https://github.com/NatanMendes0/muesli-windows/releases");
+    }
+  });
+}
+
+/* ----------------------------------------------------------- updater */
+let updateData = null;
+
+async function checkUpdatesUi(showToastIfCurrent = true) {
+  const statusEl = $("updateStatusText");
+  const actionArea = $("updateActionArea");
+  if (!isApiReady()) {
+    if (statusEl) statusEl.textContent = "Aguardando inicialização do backend...";
+    return;
+  }
+  if (statusEl) statusEl.innerHTML = 'Verificando atualizações no GitHub... <span class="spin"></span>';
+  if (actionArea) actionArea.style.display = "none";
+
+  try {
+    const res = await api().check_updates();
+    if (!res.ok) {
+      if (statusEl) statusEl.textContent = "Não foi possível verificar atualizações: " + (res.error || "erro de rede");
+      return;
+    }
+    updateData = res;
+    if ($("updateCurrentVer")) {
+      $("updateCurrentVer").textContent = "Versão instalada: v" + res.current_version;
+    }
+
+    if (res.has_update) {
+      if (statusEl) statusEl.innerHTML = `<span style="color:#16a34a; font-weight:700;">🎉 Nova versão disponível: ${escapeHtml(res.latest_version)}!</span>`;
+      $("updateTitle").textContent = res.release_name || res.latest_version;
+      $("updateNotes").textContent = res.release_notes || "Novas melhorias e correções de estabilidade.";
+      actionArea.style.display = "block";
+      $("updateDownloadProgress").style.display = "none";
+      $("btnDownloadUpdate").disabled = false;
+      toast(`Nova versão ${res.latest_version} disponível!`, 4000);
+    } else {
+      if (statusEl) statusEl.innerHTML = `<span style="color:#16a34a; font-weight:600;">✅ Você já está utilizando a versão mais recente (v${escapeHtml(res.current_version)}).</span>`;
+      actionArea.style.display = "none";
+      if (showToastIfCurrent) toast("O Muesli já está na versão mais recente!");
+    }
+  } catch (e) {
+    if (statusEl) statusEl.textContent = "Erro ao checar atualizações: " + (e.message || e);
+  }
+}
+
+async function startDownloadUpdate() {
+  if (!updateData || !updateData.zip_url) return;
+  const btn = $("btnDownloadUpdate");
+  const progEl = $("updateDownloadProgress");
+  const pctEl = $("updatePct");
+  btn.disabled = true;
+  progEl.style.display = "block";
+  toast("Iniciando download da atualização...");
+
+  try {
+    const res = await api().download_update(updateData.zip_url, updateData.zip_name);
+    if (!res.ok) {
+      toast("Falha ao iniciar download: " + (res.error || ""));
+      btn.disabled = false;
+      progEl.style.display = "none";
+      return;
+    }
+    const jobId = res.job_id;
+    const pollInterval = setInterval(async () => {
+      try {
+        const j = await api().job_status(jobId);
+        if (j.progress !== undefined) {
+          pctEl.textContent = `(${j.progress}%)`;
+        }
+        if (j.state === "done") {
+          clearInterval(pollInterval);
+          btn.disabled = false;
+          progEl.style.display = "none";
+          toast("Download concluído! A pasta Downloads foi aberta.", 6000);
+          $("updateStatusText").innerHTML = `<span style="color:#16a34a; font-weight:700;">✅ Arquivo salvo em Downloads\\${escapeHtml(j.result?.filename || "")}. Extraia o novo Muesli.exe!</span>`;
+        } else if (j.state === "error") {
+          clearInterval(pollInterval);
+          btn.disabled = false;
+          progEl.style.display = "none";
+          toast("Erro no download: " + (j.error || ""));
+        }
+      } catch (err) {
+        clearInterval(pollInterval);
+        btn.disabled = false;
+        progEl.style.display = "none";
+      }
+    }, 600);
+  } catch (e) {
+    btn.disabled = false;
+    progEl.style.display = "none";
+    toast("Erro ao baixar: " + (e.message || e));
+  }
 }
 
 let bootRetryCount = 0;
@@ -897,6 +1002,7 @@ async function boot() {
     await refreshStatus();
     setInterval(refreshStatus, 5000);
     toast("Muesli pronto para uso!", 2000);
+    setTimeout(() => checkUpdatesUi(false), 3000);
   } catch (err) {
     console.error("Erro durante inicialização:", err);
     state.booted = false; // permite tentar novamente se falhou

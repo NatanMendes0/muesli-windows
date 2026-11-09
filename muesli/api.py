@@ -4,9 +4,13 @@ Slow operations (enhance, chat) run as background jobs the UI polls with job_sta
 """
 import os
 import subprocess
+import sys
 import threading
 import time
 import uuid
+import webbrowser
+
+import requests
 
 from . import audio, chatlogic, db, enhance, fonts, session, settings, stt, templates
 from . import APP_VERSION
@@ -373,3 +377,108 @@ tags: [reuniao/executiva]
     def open_data_dir(self):
         os.startfile(settings.data_dir())
         return {"ok": True}
+
+    # ------------------------------------------------------------- updates
+
+    def check_updates(self):
+        try:
+            r = requests.get(
+                "https://api.github.com/repos/NatanMendes0/muesli-windows/releases/latest",
+                timeout=10,
+                headers={"User-Agent": f"Muesli-App/{APP_VERSION}"}
+            )
+            if r.status_code != 200:
+                return {"ok": False, "error": f"Status HTTP {r.status_code}"}
+            data = r.json()
+            latest_tag = (data.get("tag_name") or "").strip()
+
+            def parse_ver(tag_str):
+                clean = tag_str.lstrip("v").strip()
+                res = []
+                for p in clean.split("."):
+                    try:
+                        res.append(int(p))
+                    except ValueError:
+                        res.append(0)
+                return res
+
+            has_update = parse_ver(latest_tag) > parse_ver(APP_VERSION)
+            zip_url = ""
+            zip_name = f"Muesli-windows-{latest_tag}.zip"
+            for asset in data.get("assets", []):
+                if asset.get("name", "").endswith(".zip"):
+                    zip_url = asset.get("browser_download_url", "")
+                    zip_name = asset.get("name", zip_name)
+                    break
+
+            return {
+                "ok": True,
+                "current_version": APP_VERSION,
+                "latest_version": latest_tag,
+                "has_update": has_update,
+                "release_name": data.get("name") or latest_tag,
+                "release_notes": data.get("body") or "Atualizações e correções de estabilidade.",
+                "html_url": data.get("html_url") or "https://github.com/NatanMendes0/muesli-windows/releases",
+                "zip_url": zip_url or data.get("html_url", ""),
+                "zip_name": zip_name
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def open_external_url(self, url):
+        if url and (url.startswith("http://") or url.startswith("https://")):
+            webbrowser.open(url)
+            return {"ok": True}
+        return {"ok": False, "error": "URL inválida"}
+
+    def download_update(self, zip_url, filename=""):
+        job_id = self._new_job("download_update")
+
+        def worker():
+            try:
+                downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+                if not os.path.exists(downloads_dir):
+                    downloads_dir = os.path.expanduser("~")
+
+                safe_name = filename or "Muesli-windows-update.zip"
+                dest_path = os.path.join(downloads_dir, safe_name)
+
+                r = requests.get(zip_url, stream=True, timeout=180,
+                                 headers={"User-Agent": f"Muesli-App/{APP_VERSION}"})
+                r.raise_for_status()
+                total_bytes = int(r.headers.get("content-length", 0))
+                downloaded = 0
+
+                with open(dest_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=1024 * 64):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if total_bytes > 0:
+                                self._jobs[job_id]["progress"] = int((downloaded / total_bytes) * 100)
+
+                # Desbloqueia o arquivo baixado automaticamente no Windows
+                try:
+                    os.remove(dest_path + ":Zone.Identifier")
+                except OSError:
+                    pass
+
+                # Abre a pasta Downloads no Windows Explorer
+                try:
+                    if hasattr(os, "startfile"):
+                        os.startfile(downloads_dir)
+                    else:
+                        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", downloads_dir])
+                except Exception:
+                    pass
+
+                self._jobs[job_id].update(
+                    state="done",
+                    result={"path": dest_path, "filename": safe_name},
+                    done_at=time.time()
+                )
+            except Exception as e:
+                self._jobs[job_id].update(state="error", error=str(e), done_at=time.time())
+
+        threading.Thread(target=worker, daemon=True).start()
+        return {"ok": True, "job_id": job_id}

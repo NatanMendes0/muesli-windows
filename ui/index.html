@@ -141,9 +141,9 @@
     <div class="chat-dock" id="homeChatDock" style="position:absolute; bottom:0; left:0; right:0;">
       <div class="chat-panel" id="homeChatPanel"></div>
       <div class="chat-input-row">
-        <span class="chat-scope">All meetings</span>
-        <input id="homeChatInput" placeholder="Ask across all your meetings…" autocomplete="off">
-        <button class="btn-send" id="btnHomeSend">Ask</button>
+        <span class="chat-scope">Todas as reuniões</span>
+        <input id="homeChatInput" placeholder="Faça perguntas sobre todas as reuniões realizadas…" autocomplete="off">
+        <button class="btn-send" id="btnHomeSend">Enviar</button>
       </div>
     </div>
   </main>
@@ -153,142 +153,171 @@
 <div class="modal-back" id="settingsModal">
   <div class="modal">
     <div class="modal-head">
-      <h2>Settings</h2>
+      <h2>Configurações</h2>
       <button class="modal-close" id="btnCloseSettings">&times;</button>
     </div>
     <div class="modal-tabs">
-      <button class="tab active" data-set="audio">Audio</button>
-      <button class="tab" data-set="stt">Transcription</button>
-      <button class="tab" data-set="ai">AI models</button>
-      <button class="tab" data-set="templates">Templates</button>
-      <button class="tab" data-set="general">General</button>
+      <button class="tab active" data-set="audio">Áudio</button>
+      <button class="tab" data-set="stt">Transcrição</button>
+      <button class="tab" data-set="ai">Modelos de IA</button>
+      <button class="tab" data-set="templates">Modelos de Notas</button>
+      <button class="tab" data-set="updates">Atualizações</button>
+      <button class="tab" data-set="general">Geral</button>
     </div>
     <div class="modal-body">
 
       <div class="set-section visible" data-set="audio">
         <div class="field">
-          <label>Microphone</label>
+          <label>Microfone</label>
           <select id="setMic"></select>
         </div>
         <div class="field">
-          <label>System audio (loopback)</label>
+          <label>Áudio do sistema (loopback / outros participantes)</label>
           <select id="setLoop"></select>
-          <div class="hint">Captures what comes out of your speakers or headphones: the other people
-          on the call. If the list is empty, see the README section on enabling loopback.</div>
+          <div class="hint">Captura o áudio que sai dos seus alto-falantes ou fones (as outras pessoas na chamada do Teams, Meet, Zoom). Se a lista estiver vazia, verifique as permissões de áudio do Windows.</div>
         </div>
-        <button class="btn-plain" id="btnRefreshDevices">Refresh devices</button>
+        <button class="btn-plain" id="btnRefreshDevices">Atualizar dispositivos</button>
         <div style="height:14px"></div>
         <div class="check-row">
           <input type="checkbox" id="setRetain">
-          <label for="setRetain">Keep audio recordings after transcription (off = audio is discarded, like Granola)</label>
+          <label for="setRetain">Salvar arquivo WAV de áudio após transcrição (desativado = o áudio é descartado por privacidade)</label>
         </div>
       </div>
 
       <div class="set-section" data-set="stt">
         <div class="two-col">
           <div class="field">
-            <label>Engine</label>
+            <label>Motor de Transcrição</label>
             <select id="setSttEngine">
-              <option value="local">Local Whisper (free, private)</option>
-              <option value="openai">OpenAI API (needs key)</option>
-              <option value="groq">Groq API (needs key)</option>
+              <option value="local">Whisper Local (gratuito, offline e privado)</option>
+              <option value="openai">API da OpenAI (requer chave)</option>
+              <option value="groq">API da Groq (requer chave)</option>
             </select>
           </div>
           <div class="field">
-            <label>Local model size</label>
+            <label>Tamanho do Modelo Whisper</label>
             <select id="setSttModel">
-              <option value="tiny">tiny (fastest, roughest)</option>
-              <option value="base">base (default)</option>
-              <option value="small">small (better, slower)</option>
-              <option value="medium">medium (best CPU can do)</option>
+              <option value="tiny">tiny (mais rápido, menor precisão)</option>
+              <option value="base">base (padrão recomendado - rápido e preciso)</option>
+              <option value="small">small (mais preciso, mais lento)</option>
+              <option value="medium">medium (melhor precisão em CPU)</option>
             </select>
           </div>
         </div>
         <div class="field">
-          <label>Spoken language</label>
+          <label>Idioma falado</label>
           <select id="setSttLang">
-            <option value="">Auto detect</option>
-            <option value="en">English</option>
-            <option value="hi">Hindi</option>
-            <option value="es">Spanish</option>
-            <option value="fr">French</option>
-            <option value="de">German</option>
-            <option value="pt">Portuguese</option>
-            <option value="ja">Japanese</option>
-            <option value="zh">Chinese</option>
+            <option value="pt">Português (Brasil)</option>
+            <option value="">Detecção automática</option>
+            <option value="en">Inglês</option>
+            <option value="es">Espanhol</option>
+            <option value="fr">Francês</option>
+            <option value="de">Alemão</option>
+            <option value="it">Italiano</option>
+            <option value="ja">Japonês</option>
+            <option value="zh">Chinês</option>
           </select>
-          <div class="hint">Cloud engines fall back to local Whisper automatically if the API call fails,
-          so a meeting is never lost.</div>
+          <div class="hint">Os motores de nuvem alternam automaticamente para o Whisper local caso a chamada de API falhe.</div>
         </div>
       </div>
 
       <div class="set-section" data-set="ai">
         <div class="field">
-          <label>Enhancement and chat provider</label>
+          <label>Provedor de IA para Resumo e Chat</label>
           <select id="setLlmProvider">
-            <option value="auto">Auto (prefer API keys, then Ollama, then built-in)</option>
-            <option value="ollama">Ollama (local)</option>
-            <option value="anthropic">Anthropic</option>
-            <option value="openai">OpenAI</option>
+            <option value="auto">Automático (chaves de API > Ollama local > Sumarizador integrado)</option>
+            <option value="ollama">Ollama (100% local e gratuito)</option>
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="openai">OpenAI (ChatGPT)</option>
             <option value="groq">Groq</option>
-            <option value="none">Built-in extractive only (no AI)</option>
+            <option value="none">Apenas sumarizador integrado (sem IA generativa)</option>
           </select>
         </div>
         <div class="two-col">
           <div class="field">
-            <label>Ollama model</label>
+            <label>Modelo Ollama</label>
             <select id="setOllamaModel"></select>
             <div class="hint" id="ollamaHint"></div>
           </div>
           <div class="field">
-            <label>Ollama URL</label>
+            <label>URL do Ollama</label>
             <input type="text" id="setOllamaUrl" placeholder="http://localhost:11434">
           </div>
         </div>
         <div class="two-col">
           <div class="field">
-            <label>Anthropic API key (optional)</label>
+            <label>Chave de API Anthropic (opcional)</label>
             <input type="password" id="setKeyAnthropic" placeholder="sk-ant-…" autocomplete="off">
           </div>
           <div class="field">
-            <label>Anthropic model</label>
+            <label>Modelo Anthropic</label>
             <input type="text" id="setModelAnthropic">
           </div>
           <div class="field">
-            <label>OpenAI API key (optional)</label>
+            <label>Chave de API OpenAI (opcional)</label>
             <input type="password" id="setKeyOpenai" placeholder="sk-…" autocomplete="off">
           </div>
           <div class="field">
-            <label>OpenAI model</label>
+            <label>Modelo OpenAI</label>
             <input type="text" id="setModelOpenai">
           </div>
           <div class="field">
-            <label>Groq API key (optional)</label>
+            <label>Chave de API Groq (opcional)</label>
             <input type="password" id="setKeyGroq" placeholder="gsk_…" autocomplete="off">
           </div>
           <div class="field">
-            <label>Groq model</label>
+            <label>Modelo Groq</label>
             <input type="text" id="setModelGroq">
           </div>
         </div>
-        <div class="hint">Keys are stored only in a local settings file on this computer and are used
-        only to call the provider you configure. Leave everything empty to stay fully local.</div>
+        <div class="hint">As chaves de API ficam salvas apenas no seu computador e são usadas exclusivamente para chamar o provedor configurado. Deixe tudo em branco para usar o Muesli totalmente offline e gratuito.</div>
       </div>
 
       <div class="set-section" data-set="templates">
         <div class="tpl-list" id="tplManagerList"></div>
-        <button class="btn-plain" id="btnNewTemplate">New template</button>
+        <button class="btn-plain" id="btnNewTemplate">Novo modelo</button>
         <div id="tplEditor" style="display:none; margin-top:16px; border-top:1px solid var(--border); padding-top:14px;">
           <div class="two-col">
-            <div class="field"><label>Name</label><input type="text" id="tplName"></div>
-            <div class="field"><label>Description</label><input type="text" id="tplDesc"></div>
+            <div class="field"><label>Nome do Modelo</label><input type="text" id="tplName"></div>
+            <div class="field"><label>Descrição</label><input type="text" id="tplDesc"></div>
           </div>
-          <div class="field"><label>Sections</label><div id="tplSections"></div>
-            <button class="btn-plain" id="btnAddSection" style="margin-top:4px">Add section</button>
+          <div class="field"><label>Seções da Ata</label><div id="tplSections"></div>
+            <button class="btn-plain" id="btnAddSection" style="margin-top:4px">Adicionar seção</button>
           </div>
           <div style="display:flex; gap:8px; justify-content:flex-end">
-            <button class="btn-plain" id="btnCancelTpl">Cancel</button>
-            <button class="btn-enhance" id="btnSaveTpl" style="padding:8px 16px">Save template</button>
+            <button class="btn-plain" id="btnCancelTpl">Cancelar</button>
+            <button class="btn-enhance" id="btnSaveTpl" style="padding:8px 16px">Salvar modelo</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="set-section" data-set="updates">
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+          <div>
+            <div style="font-size:14px; font-weight:700; color:var(--ink);">Muesli para Windows</div>
+            <div style="font-size:12.5px; color:var(--muted);" id="updateCurrentVer">Versão instalada: v1.1.0</div>
+          </div>
+          <span style="flex:1"></span>
+          <button class="btn-plain" id="btnCheckUpdatesNow" style="padding:8px 16px; font-weight:600;">
+            🔄 Verificar atualizações
+          </button>
+        </div>
+        <div id="updateResultBox" style="background:var(--panel-soft); border:1px solid var(--border); border-radius:8px; padding:16px; min-height:120px; font-size:13px;">
+          <div style="color:var(--muted);" id="updateStatusText">Clique no botão acima para verificar se há novas versões disponíveis no GitHub.</div>
+          <div id="updateActionArea" style="display:none; margin-top:14px;">
+            <div style="font-weight:700; color:#1e40af; font-size:14px; margin-bottom:8px;" id="updateTitle"></div>
+            <div style="font-size:12px; color:var(--body-c); background:#fff; border:1px solid var(--border); border-radius:6px; padding:10px; margin-bottom:12px; max-height:160px; overflow-y:auto; white-space:pre-wrap;" id="updateNotes"></div>
+            <div style="display:flex; gap:10px; align-items:center;">
+              <button class="btn-enhance" id="btnDownloadUpdate" style="padding:9px 18px; font-weight:600;">
+                ⬇️ Baixar Nova Versão (.zip)
+              </button>
+              <button class="btn-plain" id="btnOpenUpdateGithub">
+                🌐 Ver no GitHub
+              </button>
+            </div>
+            <div id="updateDownloadProgress" style="display:none; margin-top:12px; font-size:12.5px; color:var(--ink); font-weight:500;">
+              Baixando atualização... <span class="spin"></span> <span id="updatePct"></span>
+            </div>
           </div>
         </div>
       </div>
@@ -296,26 +325,25 @@
       <div class="set-section" data-set="general">
         <div class="check-row">
           <input type="checkbox" id="setStartup">
-          <label for="setStartup">Launch Muesli when Windows starts (minimized to tray)</label>
+          <label for="setStartup">Iniciar o Muesli junto com o Windows (minimizado na bandeja)</label>
         </div>
         <div class="check-row">
           <input type="checkbox" id="setConsent">
-          <label for="setConsent">Show a consent reminder when a recording starts</label>
+          <label for="setConsent">Exibir aviso de consentimento de gravação ao iniciar</label>
         </div>
         <div class="field">
-          <label>Consent snippet (read it out or paste it in chat)</label>
+          <label>Texto do aviso de consentimento (leia ou cole no chat da reunião)</label>
           <textarea id="setConsentText" rows="3"></textarea>
         </div>
-        <button class="btn-plain" id="btnCopyConsent">Copy snippet</button>
+        <button class="btn-plain" id="btnCopyConsent">Copiar texto</button>
         <div style="height:16px"></div>
-        <button class="btn-plain" id="btnOpenData">Open data folder</button>
-        <div class="hint">All notes, transcripts and settings live in %APPDATA%\Muesli on this computer.
-        Nothing is uploaded anywhere unless you add an API key.</div>
+        <button class="btn-plain" id="btnOpenData">Abrir pasta de dados (%APPDATA%\Muesli)</button>
+        <div class="hint">Todas as notas, transcrições e configurações ficam armazenadas localmente neste computador. Nada é enviado para a nuvem sem configuração prévia.</div>
       </div>
     </div>
     <div class="modal-foot">
-      <button class="btn-plain" id="btnCancelSettings">Cancel</button>
-      <button class="btn-enhance" id="btnSaveSettings" style="padding:9px 18px">Save settings</button>
+      <button class="btn-plain" id="btnCancelSettings">Cancelar</button>
+      <button class="btn-enhance" id="btnSaveSettings" style="padding:9px 18px">Salvar configurações</button>
     </div>
   </div>
 </div>
