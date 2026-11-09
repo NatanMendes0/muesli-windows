@@ -171,7 +171,11 @@ async function openMeeting(id) {
   renderTranscript(m.segments || []);
   renderEnhanced(m.summary_md, m.summary_provider);
   renderChat($("chatPanel"), m.chat || []);
-  selectTab(m.summary_md ? "enhanced" : "notes");
+  if ($("tabCopilot")?.classList.contains("active")) {
+    selectTab("copilot");
+  } else {
+    selectTab(m.summary_md ? "enhanced" : "notes");
+  }
 
   const isLive = m.id === state.activeMeetingId && state.recording;
   setRecordingUi(isLive);
@@ -204,11 +208,27 @@ function setRecordingUi(on) {
   }
 }
 
-function selectTab(which) {
+async function selectTab(which) {
   $("tabNotes").classList.toggle("active", which === "notes");
   $("tabEnhanced").classList.toggle("active", which === "enhanced");
+  $("tabCopilot")?.classList.toggle("active", which === "copilot");
   $("notepad").classList.toggle("hidden", which !== "notes");
-  $("enhancedBody").classList.toggle("visible", which !== "notes");
+  $("enhancedBody").classList.toggle("visible", which === "enhanced");
+
+  const copilotEl = $("copilotBody");
+  if (copilotEl) {
+    copilotEl.style.display = which === "copilot" ? "flex" : "none";
+    if (which === "copilot" && state.current) {
+      try {
+        if (isApiReady()) {
+          const prompt = await api().get_copilot_prompt(state.current.id);
+          $("copilotPromptPreview").value = prompt;
+        }
+      } catch (e) {
+        console.error("Erro ao carregar prompt copilot:", e);
+      }
+    }
+  }
 }
 
 function renderEnhanced(md, provider) {
@@ -701,6 +721,7 @@ function wireEvents() {
   $("notepad").addEventListener("input", scheduleNoteSave);
   $("tabNotes").addEventListener("click", () => selectTab("notes"));
   $("tabEnhanced").addEventListener("click", () => selectTab("enhanced"));
+  $("tabCopilot")?.addEventListener("click", () => selectTab("copilot"));
   $("btnCollapseTr").addEventListener("click", () => {
     $("transcriptPane").classList.toggle("collapsed");
     $("btnCollapseTr").innerHTML = $("transcriptPane").classList.contains("collapsed") ? "&#x276E;" : "&#x276F;";
@@ -736,6 +757,23 @@ function wireEvents() {
       toast("Erro ao exportar: " + (e.message || e), 4000);
     }
   });
+  const copyCopilotAction = async () => {
+    if (!isApiReady()) { toast("Aguarde a conexão com o backend...", 3000); return; }
+    if (!state.current) { toast("Nenhuma reunião selecionada", 2500); return; }
+    try {
+      await flushNotes();
+      const res = await api().copy_copilot_prompt(state.current.id);
+      if (res.ok) {
+        toast("Prompt copiado! Cole no Microsoft Copilot com Ctrl+V", 4500);
+      } else {
+        toast("Falha ao copiar prompt: " + (res.error || ""), 4000);
+      }
+    } catch (e) {
+      toast("Erro ao copiar prompt: " + (e.message || e), 4000);
+    }
+  };
+  $("btnCopyCopilot")?.addEventListener("click", copyCopilotAction);
+  $("btnCopyCopilotBig")?.addEventListener("click", copyCopilotAction);
   $("btnCopySummary").addEventListener("click", async () => {
     if (!isApiReady()) { toast("Aguarde a conexão com o backend...", 3000); return; }
     if (!state.current) { toast("Nenhuma reunião selecionada", 2500); return; }

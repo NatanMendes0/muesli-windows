@@ -228,6 +228,71 @@ class Api:
         md = self._meeting_markdown(int(meeting_id), bool(include_transcript))
         return self.copy_text(md)
 
+    def get_copilot_prompt(self, meeting_id):
+        m = db.get_meeting(int(meeting_id))
+        if not m:
+            return ""
+        date_str = time.strftime("%d/%m/%Y %H:%M", time.localtime(m["created_at"]))
+        date_iso = time.strftime("%Y-%m-%d", time.localtime(m["created_at"]))
+        mins = int((m.get("duration_sec") or 0) // 60)
+        duracao_str = f"{mins} min" if mins else "< 1 min"
+
+        segs = db.get_segments(int(meeting_id))
+        transcricao = enhance.format_transcript(segs) if segs else "(Nenhuma transcrição capturada)"
+        rascunho = (m.get("notes_md") or "").strip() or "Nenhum rascunho manual registrado."
+        titulo = m.get("title") or "Reunião"
+
+        prompt = f"""Por favor, processe esta reunião gravada e gere a Ata Executiva padronizada (padrão SESI) em formato Markdown pronto para uso no Obsidian/Notion.
+
+### Metadados da Reunião:
+- **Título:** {titulo}
+- **Data:** {date_str}
+- **Duração:** {duracao_str}
+
+### Anotações Rápidas de Rascunho:
+{rascunho}
+
+### Transcrição Completa da Fala (Eu vs Outros):
+{transcricao}
+
+---
+### Diretrizes de Estruturação Obrigatórias (Template SESI):
+1. **Frontmatter YAML (início do documento):**
+```yaml
+---
+tipo: reuniao
+data: {date_iso}
+duracao: "{duracao_str}"
+participantes:
+  - "Participante"
+tags: [reuniao/executiva]
+---
+```
+
+2. **Cabeçalho:**
+- `# 📋 Ata Executiva: {titulo}`
+- `> 📅 **Data:** {date_str} · ⏱️ **Duração:** {duracao_str}`
+- `---`
+
+3. **## 📌 Resumo Executivo:**
+- Visão geral em 3 a 5 tópicos destacando o objetivo e as principais conclusões.
+
+4. **## 💡 Deliberações e Discussão Técnica:**
+- Tópicos numerados (`### 1. [Tema / Assunto]`) contendo:
+  - `- **Contexto Técnico:**` O que foi discutido em detalhes.
+  - `- **Status/Decisão:**` O que foi formalmente acordado ou definido.
+
+5. **## 🎯 Plano de Ação:**
+- Tabela Markdown estruturada exatamente com as colunas:
+`| Ação / Tarefa | Responsável | Prazo / Momento |`
+(Cada ação deve ter um responsável e prazo inferidos da conversa).
+"""
+        return prompt
+
+    def copy_copilot_prompt(self, meeting_id):
+        prompt = self.get_copilot_prompt(meeting_id)
+        return self.copy_text(prompt)
+
     def copy_text(self, text):
         try:
             p = subprocess.Popen(["clip"], stdin=subprocess.PIPE,
