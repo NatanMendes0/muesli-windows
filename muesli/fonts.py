@@ -56,8 +56,11 @@ def ensure_fonts_async(ui_dir: str = ""):
 
     def worker():
         try:
-            r = requests.get(FONTSHARE_URL, timeout=60,
-                             headers={"User-Agent": "Mozilla/5.0"})
+            headers = {"User-Agent": "Mozilla/5.0"}
+            try:
+                r = requests.get(FONTSHARE_URL, timeout=60, headers=headers)
+            except requests.exceptions.SSLError:
+                r = requests.get(FONTSHARE_URL, timeout=60, headers=headers, verify=False)
             r.raise_for_status()
             with zipfile.ZipFile(io.BytesIO(r.content)) as z:
                 for info in z.infolist():

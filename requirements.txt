@@ -5,3 +5,4 @@ numpy>=1.26
 pystray>=0.19.5
 Pillow>=10.0
 requests>=2.31
+truststore>=0.9.0

@@ -6,6 +6,13 @@ processes from System32, where -m muesli cannot resolve, so it points at this fi
 import os
 import sys
 
+# Inject native OS certificate store (Windows CryptoAPI) to trust corporate/proxy Root CAs
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except Exception:
+    pass
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 

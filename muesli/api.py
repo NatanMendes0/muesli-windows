@@ -11,6 +11,9 @@ import uuid
 import webbrowser
 
 import requests
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from . import audio, chatlogic, db, enhance, fonts, session, settings, stt, templates
 from . import APP_VERSION
@@ -382,11 +385,14 @@ tags: [reuniao/executiva]
 
     def check_updates(self):
         try:
-            r = requests.get(
-                "https://api.github.com/repos/NatanMendes0/muesli-windows/releases/latest",
-                timeout=10,
-                headers={"User-Agent": f"Muesli-App/{APP_VERSION}"}
-            )
+            url = "https://api.github.com/repos/NatanMendes0/muesli-windows/releases/latest"
+            headers = {"User-Agent": f"Muesli-App/{APP_VERSION}"}
+            try:
+                r = requests.get(url, timeout=10, headers=headers)
+            except requests.exceptions.SSLError:
+                # Fallback para ambientes corporativos com proxy/firewall com certificado interno
+                r = requests.get(url, timeout=10, headers=headers, verify=False)
+
             if r.status_code != 200:
                 return {"ok": False, "error": f"Status HTTP {r.status_code}"}
             data = r.json()
@@ -443,8 +449,12 @@ tags: [reuniao/executiva]
                 safe_name = filename or "Muesli-windows-update.zip"
                 dest_path = os.path.join(downloads_dir, safe_name)
 
-                r = requests.get(zip_url, stream=True, timeout=180,
-                                 headers={"User-Agent": f"Muesli-App/{APP_VERSION}"})
+                headers = {"User-Agent": f"Muesli-App/{APP_VERSION}"}
+                try:
+                    r = requests.get(zip_url, stream=True, timeout=180, headers=headers)
+                except requests.exceptions.SSLError:
+                    r = requests.get(zip_url, stream=True, timeout=180, headers=headers, verify=False)
+
                 r.raise_for_status()
                 total_bytes = int(r.headers.get("content-length", 0))
                 downloaded = 0
