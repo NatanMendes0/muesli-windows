@@ -27,7 +27,7 @@ SETTINGS_PATH = os.path.join(data_dir(), "settings.json")
 DEFAULTS = {
     "stt": {
         "engine": "local",          # local | openai | groq
-        "model": "base",            # tiny | base | small | medium | large-v3
+        "model": "base",            # tiny | base | small | medium | large-v3-turbo
         "language": "pt",           # pt | en | auto
         "compute_type": "int8",
     },

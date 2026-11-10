@@ -198,9 +198,10 @@
             <label>Tamanho do Modelo Whisper</label>
             <select id="setSttModel">
               <option value="tiny">tiny (mais rápido, menor precisão)</option>
-              <option value="base">base (padrão recomendado - rápido e preciso)</option>
-              <option value="small">small (mais preciso, mais lento)</option>
-              <option value="medium">medium (melhor precisão em CPU)</option>
+              <option value="base">base (padrão - rápido e leve)</option>
+              <option value="small">small (mais preciso)</option>
+              <option value="medium">medium (alta precisão em CPU)</option>
+              <option value="large-v3-turbo">large-v3-turbo (máxima precisão / PT-BR - ~1.5 GB)</option>
             </select>
           </div>
         </div>
@@ -295,7 +296,7 @@
         <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
           <div>
             <div style="font-size:14px; font-weight:700; color:var(--ink);">Muesli para Windows</div>
-            <div style="font-size:12.5px; color:var(--muted);" id="updateCurrentVer">Versão instalada: v1.1.0</div>
+            <div style="font-size:12.5px; color:var(--muted);" id="updateCurrentVer">Versão instalada: v1.2.0</div>
           </div>
           <span style="flex:1"></span>
           <button class="btn-plain" id="btnCheckUpdatesNow" style="padding:8px 16px; font-weight:600;">

@@ -39,7 +39,15 @@ def _get_local_model():
                              detail=f"Loading Whisper model '{name}' (first run downloads it)")
         try:
             from faster_whisper import WhisperModel
-            _model = WhisperModel(name, device="cpu",
+            model_id = name
+            if name in ("large-v3-turbo", "turbo"):
+                try:
+                    from faster_whisper.utils import available_models
+                    if "large-v3-turbo" not in available_models():
+                        model_id = "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
+                except Exception:
+                    pass
+            _model = WhisperModel(model_id, device="cpu",
                                   compute_type=cfg.get("compute_type") or "int8",
                                   download_root=settings.models_dir())
             _model_name = name
