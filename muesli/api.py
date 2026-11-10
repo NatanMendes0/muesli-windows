@@ -492,3 +492,16 @@ tags: [reuniao/executiva]
 
         threading.Thread(target=worker, daemon=True).start()
         return {"ok": True, "job_id": job_id}
+
+    def exit_app(self):
+        def _die():
+            time.sleep(0.15)
+            if self._session is not None:
+                try:
+                    self._session.stop()
+                except Exception:
+                    pass
+            os._exit(0)
+
+        threading.Thread(target=_die, daemon=True).start()
+        return {"ok": True}

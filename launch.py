@@ -43,6 +43,22 @@ def unblock_self():
 unblock_self()
 
 
+def kill_other_instances():
+    """Ensure opening a new version terminates any orphan Muesli instance in background."""
+    if sys.platform != "win32":
+        return
+    try:
+        import subprocess
+        current_pid = os.getpid()
+        cmd = f'taskkill /F /FI "IMAGENAME eq Muesli.exe" /FI "PID ne {current_pid}"'
+        subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
+kill_other_instances()
+
+
 def selftest():
     """Headless check that the heavy native pieces load inside a frozen build.
     Writes selftest.json next to the executable; exit code 0 on success."""

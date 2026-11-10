@@ -5,7 +5,7 @@ import threading
 
 import webview
 
-from . import APP_NAME, api as api_mod, db, fonts, icon as icon_mod, stt
+from . import APP_NAME, APP_VERSION, api as api_mod, db, fonts, icon as icon_mod, stt
 
 if getattr(sys, "frozen", False):
     # PyInstaller bundle: data files live under sys._MEIPASS.
@@ -86,7 +86,7 @@ class App:
         fonts.ensure_fonts_async(UI_DIR)
         stt.preload_model_async()
         self.window = webview.create_window(
-            APP_NAME, os.path.join(UI_DIR, "index.html"), js_api=self.api,
+            f"{APP_NAME} v{APP_VERSION}", os.path.join(UI_DIR, "index.html"), js_api=self.api,
             width=1320, height=880, min_size=(980, 640),
             background_color="#F7F3EA")
         self.api._window = self.window

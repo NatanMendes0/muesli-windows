@@ -862,6 +862,18 @@ function wireEvents() {
       api().open_external_url("https://github.com/NatanMendes0/muesli-windows/releases");
     }
   });
+
+  const handleExit = () => {
+    if (confirm("Deseja realmente encerrar o Muesli completamente?")) {
+      try {
+        api().exit_app();
+      } catch (e) {
+        window.close();
+      }
+    }
+  };
+  $("btnQuitApp")?.addEventListener("click", handleExit);
+  $("btnExitAppModal")?.addEventListener("click", handleExit);
 }
 
 /* ----------------------------------------------------------- updater */

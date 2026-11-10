@@ -1,8 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<title>Muesli</title>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>Muesli v1.3.1</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -17,6 +20,7 @@
         <path d="M13.5 7.5 c0 -1.2 1 -1.2 1 -2.4"/>
       </svg>
       <span class="name">Muesli</span>
+      <span style="font-size:10px; font-weight:700; color:#1e40af; background:#dbeafe; border-radius:4px; padding:1px 5px; margin-left:6px;">v1.3.1</span>
     </div>
 
     <button class="btn-new" id="btnNew"><span class="dot"></span><span id="btnNewLabel">Nova reunião</span></button>
@@ -34,13 +38,20 @@
 
     <div class="sidebar-foot">
       <div class="status-line" id="statusLine">Iniciando backend...</div>
-      <button class="foot-btn" id="btnSettings">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="3"/>
-          <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55h.01a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/>
-        </svg>
-        Configurações
-      </button>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <button class="foot-btn" id="btnSettings" style="flex:1;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55h.01a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0 1.55 1z"/>
+          </svg>
+          Configurações
+        </button>
+        <button class="foot-btn" id="btnQuitApp" title="Encerrar o Muesli completamente" style="padding:0 8px; color:#dc2626; display:flex; align-items:center; justify-content:center;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line>
+          </svg>
+        </button>
+      </div>
     </div>
   </aside>
 
@@ -304,7 +315,7 @@
         <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
           <div>
             <div style="font-size:14px; font-weight:700; color:var(--ink);">Muesli para Windows</div>
-            <div style="font-size:12.5px; color:var(--muted);" id="updateCurrentVer">Versão instalada: v1.3.0</div>
+            <div style="font-size:12.5px; color:var(--muted);" id="updateCurrentVer">Versão instalada: v1.3.1</div>
           </div>
           <span style="flex:1"></span>
           <button class="btn-plain" id="btnCheckUpdatesNow" style="padding:8px 16px; font-weight:600;">
@@ -350,9 +361,12 @@
         <div class="hint">Todas as notas, transcrições e configurações ficam armazenadas localmente neste computador. Nada é enviado para a nuvem sem configuração prévia.</div>
       </div>
     </div>
-    <div class="modal-foot">
-      <button class="btn-plain" id="btnCancelSettings">Cancelar</button>
-      <button class="btn-enhance" id="btnSaveSettings" style="padding:9px 18px">Salvar configurações</button>
+    <div class="modal-foot" style="display:flex; justify-content:space-between; align-items:center;">
+      <button class="btn-plain danger" id="btnExitAppModal" style="color:#dc2626; font-weight:600;">Encerrar Muesli</button>
+      <div style="display:flex; gap:10px;">
+        <button class="btn-plain" id="btnCancelSettings">Cancelar</button>
+        <button class="btn-enhance" id="btnSaveSettings" style="padding:9px 18px">Salvar configurações</button>
+      </div>
     </div>
   </div>
 </div>
