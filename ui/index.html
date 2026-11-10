@@ -204,22 +204,30 @@
               <option value="large-v3-turbo">large-v3-turbo (máxima precisão / PT-BR - ~1.5 GB)</option>
             </select>
           </div>
+          <div class="field">
+            <label>Aceleração de Hardware (Processamento)</label>
+            <select id="setSttDevice">
+              <option value="cpu">CPU (Processador - Padrão universal para qualquer PC)</option>
+              <option value="cuda">GPU NVIDIA (Placa de vídeo dedicada via CUDA)</option>
+              <option value="auto">Automático (Usar GPU NVIDIA se disponível)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Idioma falado</label>
+            <select id="setSttLang">
+              <option value="pt">Português (Brasil)</option>
+              <option value="">Detecção automática</option>
+              <option value="en">Inglês</option>
+              <option value="es">Espanhol</option>
+              <option value="fr">Francês</option>
+              <option value="de">Alemão</option>
+              <option value="it">Italiano</option>
+              <option value="ja">Japonês</option>
+              <option value="zh">Chinês</option>
+            </select>
+          </div>
         </div>
-        <div class="field">
-          <label>Idioma falado</label>
-          <select id="setSttLang">
-            <option value="pt">Português (Brasil)</option>
-            <option value="">Detecção automática</option>
-            <option value="en">Inglês</option>
-            <option value="es">Espanhol</option>
-            <option value="fr">Francês</option>
-            <option value="de">Alemão</option>
-            <option value="it">Italiano</option>
-            <option value="ja">Japonês</option>
-            <option value="zh">Chinês</option>
-          </select>
-          <div class="hint">Os motores de nuvem alternam automaticamente para o Whisper local caso a chamada de API falhe.</div>
-        </div>
+        <div class="hint">Dica: Se a máquina possui placa de vídeo NVIDIA (GeForce / RTX / GTX), selecione "GPU NVIDIA" para transcrição ultrarrápida. Se não for detectada, o Muesli alterna com segurança para a CPU.</div>
       </div>
 
       <div class="set-section" data-set="ai">
@@ -296,7 +304,7 @@
         <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
           <div>
             <div style="font-size:14px; font-weight:700; color:var(--ink);">Muesli para Windows</div>
-            <div style="font-size:12.5px; color:var(--muted);" id="updateCurrentVer">Versão instalada: v1.2.1</div>
+            <div style="font-size:12.5px; color:var(--muted);" id="updateCurrentVer">Versão instalada: v1.3.0</div>
           </div>
           <span style="flex:1"></span>
           <button class="btn-plain" id="btnCheckUpdatesNow" style="padding:8px 16px; font-weight:600;">

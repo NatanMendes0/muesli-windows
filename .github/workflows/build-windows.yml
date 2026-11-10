@@ -33,6 +33,8 @@ jobs:
             --icon "muesli.ico" `
             --add-data "ui;ui" `
             --collect-data "faster_whisper" `
+            --collect-data "ctranslate2" `
+            --hidden-import "truststore" `
             --hidden-import "pystray._win32" `
             --hidden-import "webview.platforms.winforms" `
             --hidden-import "webview.platforms.edgechromium" `

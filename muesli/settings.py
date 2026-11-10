@@ -28,6 +28,7 @@ DEFAULTS = {
     "stt": {
         "engine": "local",          # local | openai | groq
         "model": "base",            # tiny | base | small | medium | large-v3-turbo
+        "device": "cpu",            # cpu | cuda | auto
         "language": "pt",           # pt | en | auto
         "compute_type": "int8",
     },

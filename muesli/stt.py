@@ -32,11 +32,16 @@ def _get_local_model():
     global _model, _model_name
     cfg = settings.load()["stt"]
     name = cfg.get("model") or "base"
+    wanted_device = cfg.get("device") or "cpu"
+    key = f"{name}:{wanted_device}"
     with _model_lock:
-        if _model is not None and _model_name == name:
+        if _model is not None and _model_name == key:
             return _model
+        if _model is not None:
+            del _model
+            _model = None
         _model_status.update(state="loading",
-                             detail=f"Loading Whisper model '{name}' (first run downloads it)")
+                             detail=f"Carregando Whisper '{name}' ({wanted_device.upper()})...")
         try:
             from faster_whisper import WhisperModel
             model_id = name
@@ -47,11 +52,41 @@ def _get_local_model():
                         model_id = "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
                 except Exception:
                     pass
-            _model = WhisperModel(model_id, device="cpu",
-                                  compute_type=cfg.get("compute_type") or "int8",
-                                  download_root=settings.models_dir())
-            _model_name = name
-            _model_status.update(state="ready", detail=f"Whisper '{name}' ready")
+
+            target_device = "cpu"
+            if wanted_device in ("cuda", "auto"):
+                can_cuda = False
+                try:
+                    import ctranslate2
+                    can_cuda = ctranslate2.get_cuda_device_count() > 0
+                except Exception:
+                    pass
+
+                if can_cuda:
+                    try:
+                        # Em GPUs com 4GB VRAM (como GTX 1650 / RTX 3050), float16 é o padrão ideal
+                        _model = WhisperModel(model_id, device="cuda",
+                                              compute_type="float16",
+                                              download_root=settings.models_dir())
+                        target_device = "cuda"
+                    except Exception:
+                        # Fallback seguro para CPU
+                        _model = WhisperModel(model_id, device="cpu",
+                                              compute_type="int8",
+                                              download_root=settings.models_dir())
+                        target_device = "cpu"
+                else:
+                    _model = WhisperModel(model_id, device="cpu",
+                                          compute_type=cfg.get("compute_type") or "int8",
+                                          download_root=settings.models_dir())
+            else:
+                _model = WhisperModel(model_id, device="cpu",
+                                      compute_type=cfg.get("compute_type") or "int8",
+                                      download_root=settings.models_dir())
+
+            _model_name = key
+            hw_info = "GPU NVIDIA (CUDA)" if target_device == "cuda" else "CPU"
+            _model_status.update(state="ready", detail=f"Whisper '{name}' pronto ({hw_info})")
             return _model
         except Exception as e:
             _model_status.update(state="error", detail=str(e))

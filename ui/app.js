@@ -522,6 +522,7 @@ async function openSettings() {
     // stt
     $("setSttEngine").value = s.stt.engine;
     $("setSttModel").value = s.stt.model;
+    if ($("setSttDevice")) $("setSttDevice").value = s.stt.device || "cpu";
     $("setSttLang").value = s.stt.language || "";
     // ai
     $("setLlmProvider").value = s.llm.provider;
@@ -569,6 +570,7 @@ async function saveSettings() {
     stt: {
       engine: $("setSttEngine").value,
       model: $("setSttModel").value,
+      device: $("setSttDevice") ? $("setSttDevice").value : "cpu",
       language: $("setSttLang").value,
     },
     llm: {
@@ -700,7 +702,7 @@ async function refreshStatus() {
     else bits.push("IA: sumarizador integrado (offline)");
     if (st.stt_model.state === "loading") bits.push("Whisper: carregando modelo…");
     else if (st.stt_model.state === "error") bits.push("Whisper: erro no modelo");
-    else bits.push(`Whisper: ${escapeHtml(st.stt_model.name || "pronto")}`);
+    else bits.push(`Whisper: ${escapeHtml(st.stt_model.detail || st.stt_model.name || "pronto")}`);
     if (!st.audio_backend_ok) bits.push("Aviso: dispositivo de áudio indisponível");
     $("statusLine").innerHTML = bits.join("<br>");
     // resume live session state after a UI reload
