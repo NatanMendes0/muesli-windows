@@ -1,70 +1,76 @@
 # Muesli
 
-**A free, open-source alternative to Granola for Windows.** Muesli is an AI meeting
-notepad that takes notes without a bot joining your call. It captures your microphone
-and your system audio directly, transcribes the meeting locally with Whisper, and turns
-your rough notes into a clean, structured summary. No account, no cloud, no subscription,
-no telemetry. Your meetings never leave your computer.
+**Uma alternativa gratuita e de código aberto ao Granola para Windows.** O Muesli é um
+bloco de notas de reuniões com IA que registra notas sem que um bot entre na chamada. Ele
+captura o microfone e o áudio do sistema diretamente, transcreve a reunião localmente com
+o Whisper e transforma suas notas brutas em um resumo limpo e estruturado. Sem conta,
+nuvem, assinatura ou telemetria. Suas reuniões nunca saem do computador.
 
-![MIT license](https://img.shields.io/badge/license-MIT-green)
-![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
+![Licença MIT](https://img.shields.io/badge/license-MIT-green)
+![Plataforma](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
 ![Python](https://img.shields.io/badge/python-3.10--3.12-blue)
-![No cloud](https://img.shields.io/badge/cloud-none-lightgrey)
+![Sem nuvem](https://img.shields.io/badge/cloud-none-lightgrey)
 
-![Muesli screenshot](docs/screenshot.png)
+![Captura de tela do Muesli](docs/screenshot.png)
 
-Works with **Zoom, Google Meet, Microsoft Teams, Webex, Slack huddles, phone calls on
-speaker, and in-person meetings**, because it listens to your audio devices instead of
-plugging into any one meeting platform.
+Funciona com **Zoom, Google Meet, Microsoft Teams, Webex, chamadas do Slack, chamadas
+telefônicas no viva-voz e reuniões presenciais**, porque escuta seus dispositivos de
+áudio em vez de se conectar a uma plataforma específica de reuniões.
 
-## Why Muesli
+## Por que o Muesli
 
-Granola is a great product, but it is a paid subscription and your meeting audio and
-transcripts go through the cloud. Muesli is the same core idea, rebuilt to run entirely
-on your own machine, for free:
+O Granola é um ótimo produto, mas funciona por assinatura paga e o áudio e as
+transcrições das suas reuniões passam pela nuvem. O Muesli tem a mesma ideia central,
+recriada para funcionar inteiramente na sua máquina e de graça:
 
 | | Muesli | Granola |
 |---|---|---|
-| Price | Free, MIT-licensed | Subscription after trial |
-| Bot joins your meeting | No | No |
-| Where audio is processed | Your computer (local Whisper) | Cloud transcription |
-| Where notes live | Local SQLite in %APPDATA% | Their cloud |
-| Account required | None | Yes |
-| AI enhancement | Local Ollama, your own API key, or a built-in offline summarizer | Cloud models |
-| Windows support | Yes, Windows first | Yes |
-| Works offline | Yes (after first-run model download) | No |
+| Preço | Gratuito, licenciado sob MIT | Assinatura após o período de teste |
+| Um bot entra na reunião | Não | Não |
+| Onde o áudio é processado | Seu computador (Whisper local) | Transcrição na nuvem |
+| Onde as notas ficam | SQLite local em `%APPDATA%` | Nuvem deles |
+| Conta necessária | Nenhuma | Sim |
+| Aprimoramento por IA | Ollama local, sua própria chave de API ou um resumidor offline integrado | Modelos na nuvem |
+| Suporte ao Windows | Sim, Windows em primeiro lugar | Sim |
+| Funciona offline | Sim (após o download inicial do modelo) | Não |
 
-## Features
+## Recursos
 
-- **Bot-free capture**: records your mic and your speakers (WASAPI loopback) so it hears
-  every participant on any platform, tagged "Me" and "Them".
-- **Live local transcription**: streaming speech-to-text with faster-whisper on your CPU.
-  Nothing is uploaded.
-- **Rough notes in, clean notes out**: jot bullets during the call, hit Enhance after,
-  and your notes get merged with the transcript into a structured summary. Your notes act
-  as anchors: write "pricing concerns" and every pricing moment gets pulled in.
-- **Templates**: Auto, 1:1, Standup, Weekly Sync, Sales/Discovery, Interview, plus your
-  own custom templates.
-- **Chat with your meetings**: ask "what did we decide?" or "draft a follow-up email",
-  scoped to one meeting or across all of them, grounded in your transcripts.
-- **Library and search**: full-text search over every transcript, note and summary.
-- **Export**: Markdown export and copy-to-clipboard.
-- **Free by default, better with more**: with nothing installed you still get a solid
-  extractive summary. Install [Ollama](https://ollama.com) for free local AI, or add an
-  OpenAI / Anthropic / Groq key for faster, sharper results. Keys stay in a local file.
-- **Privacy first**: audio is transcribed in memory and discarded (retention is an
-  opt-in setting), notes stay in local SQLite, and there is no telemetry of any kind.
+- **Captura sem bot**: grava seu microfone e seus alto-falantes (loopback WASAPI), ouvindo
+  todos os participantes em qualquer plataforma e identificando-os como "Eu" e "Outros".
+- **Transcrição local ao vivo**: conversão de fala em texto por streaming com
+  faster-whisper na sua CPU. Nada é enviado para a nuvem.
+- **Notas brutas entram, notas limpas saem**: escreva tópicos durante a chamada, clique
+  em Aprimorar depois, e suas notas serão combinadas com a transcrição em um resumo
+  estruturado. Suas notas funcionam como âncoras: escreva "preocupações com preços" e
+  todos os momentos relacionados a preços serão incluídos.
+- **Modelos**: Automático, 1:1, Daily, Reunião semanal, Vendas/Descoberta, Entrevista,
+  além dos seus próprios modelos personalizados.
+- **Converse com suas reuniões**: pergunte "o que decidimos?" ou "redija um e-mail de
+  acompanhamento", com escopo de uma reunião ou de todas elas, usando suas transcrições
+  como base.
+- **Biblioteca e pesquisa**: pesquisa de texto completo em todas as transcrições, notas
+  e resumos.
+- **Exportação**: exportação em Markdown e cópia para a área de transferência.
+- **Gratuito por padrão, melhor com mais recursos**: sem instalar nada, você ainda tem um
+  bom resumo extrativo. Instale o [Ollama](https://ollama.com) para obter IA local
+  gratuita ou adicione uma chave da OpenAI, Anthropic ou Groq para resultados mais
+  rápidos e precisos. As chaves ficam em um arquivo local.
+- **Privacidade em primeiro lugar**: o áudio é transcrito na memória e descartado
+  (a retenção é opcional), as notas ficam em um SQLite local e não existe telemetria de
+  nenhum tipo.
 
-## Install
+## Instalação
 
-### Option 1: download the app (no Python needed)
+### Opção 1: baixar o aplicativo (sem precisar do Python)
 
-1. Grab `Muesli-windows-x64.zip` from the [latest release](../../releases/latest).
-2. Unzip anywhere (for example `C:\Apps\Muesli`).
-3. Run `Muesli.exe`. Windows SmartScreen may warn because the build is unsigned:
-   click "More info" then "Run anyway", or build from source instead.
+1. Baixe `Muesli-windows-x64.zip` na [versão mais recente](../../releases/latest).
+2. Descompacte em qualquer lugar (por exemplo, `C:\Apps\Muesli`).
+3. Execute `Muesli.exe`. O Windows SmartScreen pode avisar que a compilação não é
+   assinada: clique em "Mais informações" e depois em "Executar assim mesmo", ou compile
+   a partir do código-fonte.
 
-### Option 2: run from source
+### Opção 2: executar a partir do código-fonte
 
 ```
 git clone https://github.com/shivankoctupie/muesli
@@ -72,120 +78,131 @@ cd muesli
 run.bat
 ```
 
-`run.bat` creates a Python virtual environment, installs dependencies and starts the
-app. Needs Windows 10/11 and Python 3.10 to 3.12 on PATH. After the first run it starts
-in seconds. `run_debug.bat` starts it with a console and devtools.
+O `run.bat` cria um ambiente virtual do Python, instala as dependências e inicia o
+aplicativo. É necessário ter Windows 10/11 e Python 3.10 a 3.12 no `PATH`. Depois da
+primeira execução, o aplicativo inicia em poucos segundos. O `run_debug.bat` inicia o
+aplicativo com um console e as ferramentas de desenvolvimento.
 
-Either way, the first recording downloads the Whisper "base" model (about 75 MB) and
-the Satoshi UI font, so keep the internet on once. After that Muesli works fully
-offline.
+Em ambos os casos, a primeira gravação baixa o modelo Whisper "base" (cerca de 75 MB) e
+a fonte Satoshi da interface. Portanto, mantenha a internet ativada uma vez. Depois
+disso, o Muesli funciona totalmente offline.
 
-## Using it
+## Como usar
 
-1. Hit **New note** when your meeting starts. Live transcription begins immediately.
-2. Type rough notes in the left pane while the transcript builds on the right.
-3. Hit **Stop**, pick a template, hit **Enhance notes**.
-4. Ask questions in the chat bar, or use the one-click "Action items" and
-   "Follow-up email" actions.
-5. Find and search everything later in the sidebar library.
+1. Clique em **Nova nota** quando sua reunião começar. A transcrição ao vivo começa
+   imediatamente.
+2. Escreva notas brutas no painel esquerdo enquanto a transcrição é criada à direita.
+3. Clique em **Parar**, escolha um modelo e clique em **Aprimorar notas**.
+4. Faça perguntas na barra de conversa ou use as ações de um clique **Itens de ação** e
+   **E-mail de acompanhamento**.
+5. Encontre e pesquise tudo depois na biblioteca da barra lateral.
 
-Muesli lives in the system tray: closing the window hides it, right-click the tray icon
-to quit. Launch-at-startup is in Settings.
+O Muesli fica na bandeja do sistema: fechar a janela a oculta; clique com o botão direito
+no ícone da bandeja para sair. A inicialização automática fica em Configurações.
 
-## Microphone and system audio on Windows
+## Microfone e áudio do sistema no Windows
 
-- **Microphone permission**: Settings > Privacy & security > Microphone. Enable
-  "Microphone access" and "Let desktop apps access your microphone".
-- **System audio** needs no permission; Muesli captures it through WASAPI loopback on
-  your default output device. Pick a specific device in Settings > Audio.
-- While recording, Muesli plays silence to the output device. This is inaudible and
-  intentional: Windows only feeds loopback data while the device is active, and this
-  keeps capture stable through quiet stretches.
-- No loopback device listed? Update your audio driver, make sure a default playback
-  device is set, and hit "Refresh devices" in Settings > Audio. Muesli falls back to
-  mic-only recording with a visible warning, so a meeting is never lost outright.
-- If you switch output devices mid-meeting (plugging in headphones), stop and start the
-  note again; capture stays bound to the device it started on.
+- **Permissão do microfone**: Configurações > Privacidade e segurança > Microfone.
+  Ative "Acesso ao microfone" e "Permitir que aplicativos da área de trabalho acessem
+  seu microfone".
+- **O áudio do sistema** não precisa de permissão; o Muesli o captura por loopback WASAPI
+  no seu dispositivo de saída padrão. Escolha um dispositivo específico em Configurações
+  > Áudio.
+- Durante a gravação, o Muesli reproduz silêncio no dispositivo de saída. Isso é
+  inaudível e intencional: o Windows só fornece dados de loopback enquanto o dispositivo
+  está ativo, e isso mantém a captura estável durante períodos silenciosos.
+- Nenhum dispositivo de loopback listado? Atualize o driver de áudio, verifique se há um
+  dispositivo de reprodução padrão definido e clique em "Atualizar dispositivos" em
+  Configurações > Áudio. O Muesli usa a gravação somente pelo microfone como alternativa,
+  exibindo um aviso, para que uma reunião nunca seja perdida por completo.
+- Se você trocar de dispositivo de saída durante a reunião (por exemplo, ao conectar
+  fones de ouvido), pare e inicie a nota novamente; a captura continua vinculada ao
+  dispositivo usado no início.
 
-## Optional: smarter AI
+## Opcional: IA mais inteligente
 
-- **Ollama (free, local)**: install from [ollama.com](https://ollama.com) and pull a
-  model (`ollama pull llama3.2:3b` is fast on CPU; `qwen3:8b` is smarter but slower).
-  Muesli detects it automatically.
-- **API keys (paid, fastest)**: add an OpenAI, Anthropic or Groq key in Settings > AI
-  models. A configured key is preferred automatically; remove it and Muesli falls back
-  to Ollama, then to the built-in summarizer. Keys are stored only in
-  `%APPDATA%\Muesli\settings.json` and sent only to the provider you configured.
-- **Cloud transcription** (optional): switch Settings > Transcription to OpenAI or Groq
-  Whisper APIs. If a cloud call fails mid-meeting, Muesli falls back to local Whisper so
-  the transcript keeps flowing.
+- **Ollama (gratuito e local)**: instale pelo [ollama.com](https://ollama.com) e baixe um
+  modelo (`ollama pull llama3.2:3b` é rápido na CPU; `qwen3:8b` é mais inteligente,
+  porém mais lento). O Muesli o detecta automaticamente.
+- **Chaves de API (pagas e mais rápidas)**: adicione uma chave da OpenAI, Anthropic ou
+  Groq em Configurações > Modelos de IA. Uma chave configurada é priorizada
+  automaticamente; remova-a e o Muesli usará o Ollama e depois o resumidor integrado.
+  As chaves são armazenadas apenas em `%APPDATA%\Muesli\settings.json` e enviadas
+  somente ao provedor configurado.
+- **Transcrição na nuvem (opcional)**: altere Configurações > Transcrição para as APIs
+  Whisper da OpenAI ou Groq. Se uma chamada à nuvem falhar durante a reunião, o Muesli
+  volta ao Whisper local para que a transcrição continue.
 
-## FAQ
+## Perguntas frequentes
 
-**Is Muesli really free?**
-Yes. MIT-licensed, no trial, no locked features, no account. Local Whisper and the
-built-in summarizer cost nothing. Ollama is also free. API keys are optional and billed
-by their providers, not by Muesli.
+**O Muesli é realmente gratuito?**
+Sim. Ele é licenciado sob MIT, sem período de teste, recursos bloqueados ou conta. O
+Whisper local e o resumidor integrado não custam nada. O Ollama também é gratuito.
+As chaves de API são opcionais e cobradas pelos respectivos provedores, não pelo Muesli.
 
-**Does it work with Zoom / Google Meet / Teams?**
-Yes, and with anything else that makes sound on your PC. Muesli captures device audio,
-not a specific app, so there is no integration to break and no bot participant that
-other people see in the call.
+**Ele funciona com Zoom / Google Meet / Teams?**
+Sim, e com qualquer outra coisa que produza som no seu PC. O Muesli captura o áudio do
+dispositivo, não de um aplicativo específico, portanto não há integração para quebrar
+nem participante-bot visível para as outras pessoas na chamada.
 
-**Is my audio uploaded anywhere?**
-No. Audio is captured, transcribed on your CPU, and discarded (unless you enable
-retention in Settings). Transcripts and notes live in a local SQLite database. The only
-network traffic is the one-time model and font download, plus any AI provider you
-explicitly configure.
+**Meu áudio é enviado para algum lugar?**
+Não. O áudio é capturado, transcrito na sua CPU e descartado (a menos que você ative a
+retenção em Configurações). As transcrições e notas ficam em um banco SQLite local. O
+único tráfego de rede é o download inicial do modelo e da fonte, além de qualquer
+provedor de IA que você configurar explicitamente.
 
-**Do I need a GPU?**
-No. The default Whisper "base" model transcribes live on a normal laptop CPU. Bigger
-models (small/medium) are available in Settings if your machine can take them.
+**Preciso de uma GPU?**
+Não. O modelo Whisper "base" padrão transcreve ao vivo em uma CPU comum de notebook.
+Modelos maiores (small/medium) estão disponíveis em Configurações caso sua máquina
+consiga executá-los.
 
-**How is this different from other open-source note takers?**
-Most alternatives either join calls as a bot, only record the microphone, or need a
-paid transcription API. Muesli does bot-free two-channel capture (you + everyone else),
-local STT, note enhancement anchored to your own rough notes, templates, and
-chat-with-your-meetings, out of the box.
+**Qual é a diferença em relação a outros anotadores de código aberto?**
+A maioria das alternativas entra nas chamadas como um bot, grava apenas o microfone ou
+precisa de uma API de transcrição paga. O Muesli oferece captura em dois canais sem bot
+(você e todos os demais), STT local, aprimoramento de notas ancorado nas suas próprias
+notas brutas, modelos e conversa com suas reuniões, tudo pronto para usar.
 
-**Should I tell people I'm recording?**
-Yes. Recording laws vary by region and consent is basic courtesy. Settings > General
-has an optional reminder with a one-line disclosure snippet you can read out or paste
-in the meeting chat.
+**Devo avisar as pessoas de que estou gravando?**
+Sim. As leis sobre gravação variam conforme a região, e pedir consentimento é uma
+questão básica de cortesia. Configurações > Geral tem um lembrete opcional com um trecho
+de divulgação de uma linha que você pode ler ou colar no chat da reunião.
 
-## Verified end-to-end test
+## Teste completo verificado
 
-The repo ships a self test (`tests\test_e2e.py`) that speaks a scripted meeting through
-the speakers and runs the full real pipeline. Result on the development machine
-(Windows 11, Realtek audio, CPU only, Ollama qwen3:8b), 2026-07-07:
+O repositório inclui um autoteste (`tests\test_e2e.py`) que reproduz uma reunião
+roteirizada pelos alto-falantes e executa todo o pipeline real. Resultado na máquina de
+desenvolvimento (Windows 11, áudio Realtek, somente CPU, Ollama qwen3:8b), 07/07/2026:
 
-- Mic + WASAPI loopback capture: PASS
-- Live streaming transcription: PASS, 4/4 test keywords, speakers tagged correctly
-- Extractive enhancement (no LLM installed): PASS
-- LLM enhancement via local Ollama: PASS, correct decisions and action items
-- Chat grounding ("Who is sending the pricing proposal and when?"): PASS
-- Packaged exe self test (`Muesli.exe --selftest`): PASS
+- Captura do microfone + loopback WASAPI: APROVADO
+- Transcrição ao vivo por streaming: APROVADO, 4/4 palavras-chave de teste, participantes identificados corretamente
+- Aprimoramento extrativo (sem LLM instalado): APROVADO
+- Aprimoramento por LLM via Ollama local: APROVADO, decisões e itens de ação corretos
+- Fundamentação da conversa ("Quem enviará a proposta de preços e quando?"): APROVADO
+- Autoteste do executável empacotado (`Muesli.exe --selftest`): APROVADO
 
-## Architecture, decisions and limitations
+## Arquitetura, decisões e limitações
 
-Single Python process: pywebview (WebView2) UI, PyAudioWPatch for WASAPI capture,
-faster-whisper for STT, SQLite + FTS5 for storage, a provider router (Anthropic /
-OpenAI / Groq / Ollama / built-in extractive) for enhancement and chat. See
-[DECISIONS.md](DECISIONS.md) for every design decision and known limitation, including
-the WASAPI loopback silence-keeper trick that makes bot-free capture reliable.
+Um único processo Python: interface pywebview (WebView2), captura WASAPI com
+PyAudioWPatch, STT com faster-whisper, SQLite + FTS5 para armazenamento e um roteador de
+provedores (Anthropic / OpenAI / Groq / Ollama / extrativo integrado) para aprimoramento
+e conversa. Consulte [DECISIONS.md](DECISIONS.md) para todas as decisões de projeto e
+limitações conhecidas, incluindo o truque do mantenedor de silêncio do loopback WASAPI
+que torna a captura sem bot confiável.
 
-Known limits: speaker tagging is an energy heuristic (not diarization), one recording
-per note, no calendar sync yet, unsigned exe. Contributions welcome on all of these.
+Limitações conhecidas: a identificação de participantes é uma heurística de energia
+(não diarização), uma gravação por nota, nenhuma sincronização de calendário ainda e
+executável não assinado. Contribuições são bem-vindas em todas essas áreas.
 
-## Contributing
+## Contribuindo
 
-Issues and PRs are welcome. Good first areas: real diarization, calendar prefill,
-auto-detecting meeting start, packaging/signing, macOS/Linux ports (the audio layer is
-the only Windows-specific piece). Run the test suite with
-`.venv\Scripts\python.exe tests\test_e2e.py` (it plays audio out loud).
+Issues e PRs são bem-vindos. Boas áreas para começar: diarização real, preenchimento
+automático de calendário, detecção automática do início da reunião, empacotamento e
+assinatura, além de versões para macOS/Linux (a camada de áudio é a única parte
+específica do Windows). Execute a suíte de testes com
+`.venv\Scripts\python.exe tests\test_e2e.py` (ela reproduz áudio em volume audível).
 
-## License
+## Licença
 
-[MIT](LICENSE). The Satoshi font is not distributed with this repo; each install
-downloads it from Fontshare under their free-font EULA (see `ui/fonts/README.md`).
-Muesli is an independent project and is not affiliated with or endorsed by Granola Inc.
+[MIT](LICENSE). A fonte Satoshi não é distribuída com este repositório; cada instalação
+a baixa do Fontshare sob sua EULA de fonte gratuita (consulte `ui/fonts/README.md`).
+O Muesli é um projeto independente e não é afiliado nem endossado pela Granola Inc.
