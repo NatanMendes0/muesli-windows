@@ -26,16 +26,25 @@ SETTINGS_PATH = os.path.join(data_dir(), "settings.json")
 
 DEFAULTS = {
     "stt": {
-        "engine": "local",          # local | openai | groq
+        "engine": "local",          # local | openrouter | openai | groq
         "model": "base",            # tiny | base | small | medium | large-v3-turbo
         "device": "cpu",            # cpu | cuda | auto
         "language": "pt",           # pt | en | auto
         "compute_type": "int8",
+        "openrouter_key": "",
+        "openrouter_model": "openai/whisper-large-v3-turbo",
+        "openai_key": "",
+        "openai_model": "whisper-1",
+        "groq_key": "",
+        "groq_model": "whisper-large-v3-turbo",
+        "cloud_fallback": True,
     },
     "llm": {
-        "provider": "auto",         # auto | ollama | openai | groq | anthropic | none
+        "provider": "auto",         # auto | ollama | openrouter | openai | groq | anthropic | none
         "ollama_url": "http://localhost:11434",
         "ollama_model": "",         # empty = first installed model
+        "openrouter_key": "",
+        "openrouter_model": "openai/gpt-4o-mini",
         "openai_key": "",
         "openai_url": "",           # custom base URL or empty for api.openai.com
         "openai_model": "gpt-4o-mini",
@@ -57,6 +66,7 @@ DEFAULTS = {
     },
     "ui": {
         "default_template": "auto",
+        "disable_gpu": False,
     },
 }
 

@@ -73,10 +73,21 @@ def _call_ollama(system: str, user: str, cfg: dict) -> str:
     return out
 
 
-def _call_openai_style(system: str, user: str, url: str, key: str, model: str) -> str:
-    r = requests.post(
+def _post_with_ssl_fallback(url: str, **kwargs):
+    try:
+        return requests.post(url, **kwargs)
+    except requests.exceptions.SSLError:
+        kwargs["verify"] = False
+        return requests.post(url, **kwargs)
+
+
+def _call_openai_style(system: str, user: str, url: str, key: str, model: str, extra_headers=None) -> str:
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    if extra_headers:
+        headers.update(extra_headers)
+    r = _post_with_ssl_fallback(
         url, timeout=REQUEST_TIMEOUT,
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        headers=headers,
         json={"model": model, "temperature": 0.3,
               "messages": [{"role": "system", "content": system},
                            {"role": "user", "content": user}]})
@@ -85,7 +96,7 @@ def _call_openai_style(system: str, user: str, url: str, key: str, model: str) -
 
 
 def _call_anthropic(system: str, user: str, key: str, model: str) -> str:
-    r = requests.post(
+    r = _post_with_ssl_fallback(
         "https://api.anthropic.com/v1/messages", timeout=REQUEST_TIMEOUT,
         headers={"x-api-key": key, "anthropic-version": "2023-06-01",
                  "Content-Type": "application/json"},
@@ -119,6 +130,13 @@ def _llm_available_uncached(cfg: dict) -> dict:
         if name == "anthropic" and cfg.get("anthropic_key"):
             out.update(provider="anthropic", detail=cfg.get("anthropic_model", ""))
             return out
+        if name == "openrouter":
+            or_key = cfg.get("openrouter_key") or (
+                settings.load()["stt"].get("openrouter_key") if provider == "openrouter" else ""
+            )
+            if or_key:
+                out.update(provider="openrouter", detail=cfg.get("openrouter_model") or "openai/gpt-4o-mini")
+                return out
         if name == "openai" and (cfg.get("openai_key") or cfg.get("openai_url")):
             out.update(provider="openai", detail=cfg.get("openai_model", ""))
             return out
@@ -135,11 +153,11 @@ def _llm_available_uncached(cfg: dict) -> dict:
 
 
 def _provider_order(cfg: dict, provider: str):
-    if provider in ("anthropic", "openai", "groq", "ollama"):
+    if provider in ("anthropic", "openrouter", "openai", "groq", "ollama"):
         return [provider]
     if provider == "none":
         return []
-    return ["anthropic", "openai", "groq", "ollama"]
+    return ["anthropic", "openrouter", "openai", "groq", "ollama"]
 
 
 def llm_complete(system: str, user: str):
@@ -151,6 +169,21 @@ def llm_complete(system: str, user: str):
             if name == "anthropic" and cfg.get("anthropic_key"):
                 return _call_anthropic(system, user, cfg["anthropic_key"],
                                        cfg.get("anthropic_model") or "claude-haiku-4-5-20251001"), "anthropic"
+            if name == "openrouter":
+                or_key = cfg.get("openrouter_key") or (
+                    settings.load()["stt"].get("openrouter_key")
+                    if cfg.get("provider") == "openrouter" else ""
+                )
+                if or_key:
+                    return _call_openai_style(
+                        system, user,
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        or_key,
+                        cfg.get("openrouter_model") or "openai/gpt-4o-mini",
+                        extra_headers={
+                            "HTTP-Referer": "https://github.com/NatanMendes0/muesli-windows",
+                            "X-Title": "Muesli",
+                        }), "openrouter"
             if name == "openai" and (cfg.get("openai_key") or cfg.get("openai_url")):
                 url = cfg.get("openai_url") or "https://api.openai.com/v1/chat/completions"
                 return _call_openai_style(system, user,

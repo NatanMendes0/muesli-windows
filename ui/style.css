@@ -179,7 +179,8 @@ input, textarea, select { font-family: var(--font); color: var(--ink); }
 .meta-row { display: flex; align-items: center; gap: 12px; color: var(--faint); font-size: 12px; flex-wrap: wrap; }
 .meters { display: flex; gap: 10px; align-items: center; }
 .meter { width: 52px; height: 2px; background: var(--border); border-radius: 1px; overflow: hidden; }
-.meter > div { height: 100%; width: 0%; background: var(--muted); transition: width 0.15s; }
+.meter > div { height: 100%; width: 100%; background: var(--muted); transform-origin: left; transform: scaleX(0); }
+body.page-hidden .dot { animation: none !important; }
 .meter-label { font-size: 10.5px; color: var(--faint); letter-spacing: 0.4px; }
 
 .banner {
