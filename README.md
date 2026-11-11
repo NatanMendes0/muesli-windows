@@ -1,5 +1,8 @@
 # Muesli
 
+> [!TIP]
+> **Configuração recomendada (gratuita e rápida):** Recomenda-se utilizar o **Groq** via chave(s) de API (**é gratuito — basta criar uma conta na plataforma [console.groq.com](https://console.groq.com)**) como motor de transcrição via **Whisper** (`whisper-large-v3-turbo`) e como provedor de **Modelos de IA**, configurando o modelo **`qwen/qwen3.8-27b`**. Você também pode cadastrar múltiplas chaves de API para rotação automática e ativar o envio em lote nas configurações para economizar limites.
+
 **Uma alternativa gratuita e de código aberto ao Granola para Windows.** O Muesli é um
 bloco de notas de reuniões com IA que registra notas sem que um bot entre na chamada. Ele
 captura o microfone e o áudio do sistema diretamente, transcreve a reunião localmente com

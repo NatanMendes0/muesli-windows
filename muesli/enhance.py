@@ -100,7 +100,7 @@ def _call_openai_style(system: str, user: str, url: str, key: str, model: str, e
               "messages": [{"role": "system", "content": system},
                            {"role": "user", "content": user}]})
     r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"].strip()
+    return _strip_think(r.json()["choices"][0]["message"]["content"])
 
 
 def _call_anthropic(system: str, user: str, key: str, model: str) -> str:
@@ -235,7 +235,7 @@ def llm_complete(system: str, user: str):
             if name == "groq":
                 keys = keypool.collect_keys(cfg, "groq_key", "groq_keys")
                 if keys:
-                    model = cfg.get("groq_model") or "llama-3.3-70b-versatile"
+                    model = cfg.get("groq_model") or "qwen/qwen3.8-27b"
                     return _call_with_rotation(
                         "llm:groq", keys,
                         lambda k: _call_openai_style(

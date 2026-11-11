@@ -83,15 +83,17 @@ class App:
 
     def run(self):
         db.init()
-        if settings.load().get("ui", {}).get("disable_gpu"):
+        ui_cfg = settings.load().get("ui", {})
+        if ui_cfg.get("disable_gpu"):
             os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
                                   "--disable-gpu --disable-gpu-compositing")
         fonts.ensure_fonts_async(UI_DIR)
         stt.preload_model_async()
+        bg = "#161614" if ui_cfg.get("theme") == "dark" else "#F7F6F2"
         self.window = webview.create_window(
             f"{APP_NAME} v{APP_VERSION}", os.path.join(UI_DIR, "index.html"), js_api=self.api,
             width=1320, height=880, min_size=(980, 640),
-            background_color="#F7F3EA")
+            background_color=bg)
         self.api._window = self.window
         self.window.events.closing += self._on_closing
         self._start_tray()

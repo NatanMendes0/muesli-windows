@@ -56,7 +56,7 @@ DEFAULTS = {
         "openai_model": "gpt-4o-mini",
         "groq_key": "",
         "groq_keys": [],
-        "groq_model": "llama-3.3-70b-versatile",
+        "groq_model": "qwen/qwen3.8-27b",
         "anthropic_key": "",
         "anthropic_keys": [],
         "anthropic_model": "claude-haiku-4-5-20251001",
@@ -75,6 +75,7 @@ DEFAULTS = {
     "ui": {
         "default_template": "auto",
         "disable_gpu": False,
+        "theme": "light",           # light | dark | auto
     },
 }
 

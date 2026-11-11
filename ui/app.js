@@ -517,6 +517,23 @@ async function flushNotes() {
 }
 
 /* ----------------------------------------------------------- settings */
+function applyTheme(mode) {
+  const m = mode || "light";
+  try { localStorage.setItem("muesli_theme", m); } catch (e) {}
+  let eff = m;
+  if (m === "auto") {
+    eff = (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+  }
+  document.documentElement.dataset.theme = eff;
+}
+
+if (window.matchMedia) {
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    const cur = (state.settings && state.settings.ui && state.settings.ui.theme) || "light";
+    if (cur === "auto") applyTheme("auto");
+  });
+}
+
 function syncSttUi() {
   const eng = $("setSttEngine")?.value || "local";
   if ($("sttLocalBox")) $("sttLocalBox").style.display = eng === "local" ? "block" : "none";
@@ -656,12 +673,13 @@ async function openSettings() {
     $("setModelOpenai").value = s.llm.openai_model;
     $("setModelGroq").value = s.llm.groq_model;
     // general
+    if ($("setTheme")) $("setTheme").value = (s.ui && s.ui.theme) || "light";
     $("setStartup").checked = !!s.launch_at_startup;
     if ($("setDisableUiGpu")) $("setDisableUiGpu").checked = !!(s.ui && s.ui.disable_gpu);
     $("setConsent").checked = !!s.consent.enabled;
     $("setConsentText").value = s.consent.snippet;
     if ($("updateCurrentVer")) {
-      const v = (state.settingsState && state.settingsState.version) || "1.4.2";
+      const v = (state.settingsState && state.settingsState.version) || "1.4.3";
       $("updateCurrentVer").textContent = "Versão instalada: v" + v;
     }
     renderTplManager();
@@ -730,10 +748,12 @@ async function saveSettings() {
     },
     ui: {
       disable_gpu: $("setDisableUiGpu") ? $("setDisableUiGpu").checked : false,
+      theme: $("setTheme") ? $("setTheme").value : "light",
     },
     launch_at_startup: $("setStartup").checked,
   };
   await api().save_settings(patch);
+  applyTheme(patch.ui.theme);
   $("settingsModal").classList.remove("visible");
   toast("Configurações salvas com sucesso!");
   refreshStatus();
@@ -967,9 +987,26 @@ function wireEvents() {
     if (e.key === "Enter") sendChat(null, $("homeChatInput"), $("homeChatPanel"));
   });
   // settings
+  const closeSettingsModal = () => {
+    $("settingsModal").classList.remove("visible");
+    if (state.settings && state.settings.ui) applyTheme(state.settings.ui.theme || "light");
+  };
   $("btnSettings").addEventListener("click", openSettings);
-  $("btnCloseSettings").addEventListener("click", () => $("settingsModal").classList.remove("visible"));
-  $("btnCancelSettings").addEventListener("click", () => $("settingsModal").classList.remove("visible"));
+  $("btnCloseSettings").addEventListener("click", closeSettingsModal);
+  $("btnCancelSettings").addEventListener("click", closeSettingsModal);
+  $("setTheme")?.addEventListener("change", () => applyTheme($("setTheme").value));
+  $("btnThemeQuick")?.addEventListener("click", async () => {
+    const curEff = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+    const next = curEff === "dark" ? "light" : "dark";
+    applyTheme(next);
+    if (isApiReady()) {
+      try {
+        await api().save_settings({ ui: { theme: next } });
+        if (state.settings && state.settings.ui) state.settings.ui.theme = next;
+      } catch (e) {}
+    }
+    toast(next === "dark" ? "Tema escuro ativado" : "Tema claro ativado", 1800);
+  });
   $("btnSaveSettings").addEventListener("click", saveSettings);
   $("btnRefreshDevices").addEventListener("click", openSettings);
   $("setSttEngine")?.addEventListener("change", syncSttUi);
@@ -994,19 +1031,19 @@ function wireEvents() {
             const bal = (r.limit_remaining !== null && r.limit_remaining !== undefined)
               ? `$${Number(r.limit_remaining).toFixed(4)} rest.`
               : `uso $${Number(r.usage || 0).toFixed(4)}`;
-            return `<span style="color:#16a34a;">#${r.index} ✅ (${escapeHtml(bal)})</span>`;
+            return `<span style="color:var(--ok);">#${r.index} ✅ (${escapeHtml(bal)})</span>`;
           }
-          return `<span style="color:#dc2626;">#${r.index} ❌ (${escapeHtml(r.error || "inválida")})</span>`;
+          return `<span style="color:var(--danger);">#${r.index} ❌ (${escapeHtml(r.error || "inválida")})</span>`;
         });
         if (st) st.innerHTML = `<strong>Resultado:</strong> ${parts.join(" &nbsp;·&nbsp; ")}`;
         toast(res.ok ? "Chave(s) OpenRouter validadas!" : ("OpenRouter: " + (res.error || "falha")), 4000);
       } else {
         const errMsg = res.error || "Falha ao validar chave.";
-        if (st) st.innerHTML = `<span style="color:#dc2626; font-weight:600;">❌ ${escapeHtml(errMsg)}</span>`;
+        if (st) st.innerHTML = `<span style="color:var(--danger); font-weight:600;">❌ ${escapeHtml(errMsg)}</span>`;
         toast("OpenRouter: " + errMsg, 4000);
       }
     } catch (e) {
-      if (st) st.innerHTML = `<span style="color:#dc2626;">❌ Erro: ${escapeHtml(e.message || String(e))}</span>`;
+      if (st) st.innerHTML = `<span style="color:var(--danger);">❌ Erro: ${escapeHtml(e.message || String(e))}</span>`;
     }
   });
   $("btnRefreshOrModels")?.addEventListener("click", async () => {
@@ -1135,7 +1172,7 @@ async function checkUpdatesUi(interactive = true) {
     }
 
     if (res.has_update) {
-      if (statusEl) statusEl.innerHTML = `<span style="color:#16a34a; font-weight:700;">🎉 Nova versão disponível: ${escapeHtml(res.latest_version)}!</span>`;
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--ok); font-weight:700;">🎉 Nova versão disponível: ${escapeHtml(res.latest_version)}!</span>`;
       $("updateTitle").textContent = res.release_name || res.latest_version;
       $("updateNotes").textContent = res.release_notes || "Novas melhorias e correções de estabilidade.";
       actionArea.style.display = "block";
@@ -1149,7 +1186,7 @@ async function checkUpdatesUi(interactive = true) {
       if (interactive) toast(`Nova versão ${res.latest_version} disponível!`, 4000);
     } else {
       if (corner) corner.style.display = "none";
-      if (statusEl) statusEl.innerHTML = `<span style="color:#16a34a; font-weight:600;">✅ Você já está utilizando a versão mais recente (v${escapeHtml(res.current_version)}).</span>`;
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--ok); font-weight:600;">✅ Você já está utilizando a versão mais recente (v${escapeHtml(res.current_version)}).</span>`;
       if (actionArea) actionArea.style.display = "none";
       if (interactive) toast("O Muesli já está na versão mais recente!");
     }
@@ -1189,7 +1226,7 @@ async function startDownloadUpdate() {
           btn.disabled = false;
           progEl.style.display = "none";
           toast("Download concluído! A pasta Downloads foi aberta.", 6000);
-          $("updateStatusText").innerHTML = `<span style="color:#16a34a; font-weight:700;">✅ Arquivo salvo em Downloads\\${escapeHtml(j.result?.filename || "")}. Extraia o novo Muesli.exe!</span>`;
+          $("updateStatusText").innerHTML = `<span style="color:var(--ok); font-weight:700;">✅ Arquivo salvo em Downloads\\${escapeHtml(j.result?.filename || "")}. Extraia o novo Muesli.exe!</span>`;
         } else if (j.state === "error") {
           clearInterval(pollInterval);
           btn.disabled = false;
@@ -1228,7 +1265,7 @@ function scheduleBootRetry() {
     setTimeout(scheduleBootRetry, 250);
   } else {
     const el = $("statusLine");
-    if (el) el.innerHTML = `<span style="color:#d9534f;font-weight:600">Backend não respondeu (timeout 1 min)</span>`;
+    if (el) el.innerHTML = `<span style="color:var(--danger);font-weight:600">Backend não respondeu (timeout 1 min)</span>`;
     toast("O backend não respondeu após 1 minuto. Verifique se o WebView2 está instalado ou se a pasta foi extraída do ZIP.", 8000);
   }
 }
@@ -1253,6 +1290,7 @@ async function boot() {
   try {
     await loadTemplates();
     state.settings = await api().get_settings();
+    applyTheme((state.settings.ui && state.settings.ui.theme) || "light");
     await refreshMeetings();
     try { renderChat($("homeChatPanel"), await api().get_global_chat()); } catch (e) {}
     await refreshStatus();
