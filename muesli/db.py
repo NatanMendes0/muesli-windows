@@ -16,6 +16,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS meetings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL DEFAULT 'Untitled meeting',
+    title_manual INTEGER DEFAULT 0,
     created_at REAL NOT NULL,
     ended_at REAL,
     duration_sec REAL DEFAULT 0,
@@ -77,6 +78,10 @@ def init():
     global _fts_available
     c = conn()
     c.executescript(SCHEMA)
+    cols = {row[1] for row in c.execute("PRAGMA table_info(meetings)").fetchall()}
+    if "title_manual" not in cols:
+        c.execute("ALTER TABLE meetings ADD COLUMN title_manual INTEGER DEFAULT 0")
+        c.execute("UPDATE meetings SET title_manual=1 WHERE title != 'Untitled meeting' AND title != ''")
     try:
         c.executescript(FTS_SCHEMA)
         _fts_available = True
@@ -94,9 +99,11 @@ def fts_available() -> bool:
 
 def create_meeting(title: str, template_id: str) -> int:
     c = conn()
+    clean = (title or "").strip() or "Untitled meeting"
+    manual = 1 if clean != "Untitled meeting" else 0
     cur = c.execute(
-        "INSERT INTO meetings (title, created_at, template_id) VALUES (?, ?, ?)",
-        (title or "Untitled meeting", time.time(), template_id or "auto"))
+        "INSERT INTO meetings (title, title_manual, created_at, template_id) VALUES (?, ?, ?, ?)",
+        (clean, manual, time.time(), template_id or "auto"))
     c.commit()
     return cur.lastrowid
 
@@ -107,7 +114,7 @@ def end_meeting(meeting_id: int, duration_sec: float, audio_path: str = ""):
     c.commit()
 
 def update_meeting(meeting_id: int, **fields):
-    allowed = {"title", "notes_md", "summary_md", "summary_provider", "template_id", "attendees"}
+    allowed = {"title", "title_manual", "notes_md", "summary_md", "summary_provider", "template_id", "attendees"}
     sets, vals = [], []
     for k, v in fields.items():
         if k in allowed:

@@ -194,6 +194,7 @@ function setRecordingUi(on) {
   $("meters").style.display = on ? "flex" : "none";
   $("btnNewLabel").textContent = state.recording ? "Gravando…" : "Nova reunião";
   $("btnNew").classList.toggle("recording", state.recording);
+  document.body.classList.toggle("is-recording", !!state.recording);
   if (!on && $("trBatchBar")) $("trBatchBar").style.display = "none";
   const cb = $("consentBanner");
   if (on && state.settings && state.settings.consent && state.settings.consent.enabled) {
@@ -443,9 +444,16 @@ async function enhanceNow() {
     if (state.current && state.current.id === mid) {
       state.current.summary_md = out.summary_md;
       state.current.summary_provider = out.provider;
+      if (out.title) {
+        state.current.title = out.title;
+        if (document.activeElement !== $("noteTitle")) {
+          $("noteTitle").value = out.title === "Untitled meeting" ? "" : out.title;
+        }
+      }
       renderEnhanced(out.summary_md, out.provider);
       selectTab("enhanced");
     }
+    refreshMeetings();
     toast("Notas aprimoradas com sucesso!");
   } else {
     toast("Falha no aprimoramento. Verifique as Configurações de IA.", 4000);
@@ -653,7 +661,7 @@ async function openSettings() {
     $("setConsent").checked = !!s.consent.enabled;
     $("setConsentText").value = s.consent.snippet;
     if ($("updateCurrentVer")) {
-      const v = (state.settingsState && state.settingsState.version) || "1.4.1";
+      const v = (state.settingsState && state.settingsState.version) || "1.4.2";
       $("updateCurrentVer").textContent = "Versão instalada: v" + v;
     }
     renderTplManager();
@@ -1065,6 +1073,17 @@ function wireEvents() {
   $("btnSaveTpl").addEventListener("click", saveTpl);
   $("btnCheckUpdatesNow")?.addEventListener("click", () => checkUpdatesUi(true));
   $("btnDownloadUpdate")?.addEventListener("click", startDownloadUpdate);
+  $("btnUcOpen")?.addEventListener("click", async () => {
+    await openSettings();
+    document.querySelectorAll(".modal-tabs .tab").forEach(x =>
+      x.classList.toggle("active", x.dataset.set === "updates"));
+    document.querySelectorAll(".set-section").forEach(s =>
+      s.classList.toggle("visible", s.dataset.set === "updates"));
+    if ($("updateCornerBanner")) $("updateCornerBanner").style.display = "none";
+  });
+  $("btnUcDismiss")?.addEventListener("click", () => {
+    if ($("updateCornerBanner")) $("updateCornerBanner").style.display = "none";
+  });
   $("btnOpenUpdateGithub")?.addEventListener("click", () => {
     if (updateData && updateData.html_url) {
       api().open_external_url(updateData.html_url);
@@ -1089,20 +1108,25 @@ function wireEvents() {
 /* ----------------------------------------------------------- updater */
 let updateData = null;
 
-async function checkUpdatesUi(showToastIfCurrent = true) {
+async function checkUpdatesUi(interactive = true) {
   const statusEl = $("updateStatusText");
   const actionArea = $("updateActionArea");
+  const corner = $("updateCornerBanner");
   if (!isApiReady()) {
-    if (statusEl) statusEl.textContent = "Aguardando inicialização do backend...";
+    if (interactive && statusEl) statusEl.textContent = "Aguardando inicialização do backend...";
     return;
   }
-  if (statusEl) statusEl.innerHTML = 'Verificando atualizações no GitHub... <span class="spin"></span>';
-  if (actionArea) actionArea.style.display = "none";
+  if (interactive && statusEl) {
+    statusEl.innerHTML = 'Verificando atualizações no GitHub... <span class="spin"></span>';
+  }
+  if (interactive && actionArea) actionArea.style.display = "none";
 
   try {
     const res = await api().check_updates();
     if (!res.ok) {
-      if (statusEl) statusEl.textContent = "Não foi possível verificar atualizações: " + (res.error || "erro de rede");
+      if (interactive && statusEl) {
+        statusEl.textContent = "Não foi possível verificar atualizações: " + (res.error || "erro de rede");
+      }
       return;
     }
     updateData = res;
@@ -1117,14 +1141,22 @@ async function checkUpdatesUi(showToastIfCurrent = true) {
       actionArea.style.display = "block";
       $("updateDownloadProgress").style.display = "none";
       $("btnDownloadUpdate").disabled = false;
-      toast(`Nova versão ${res.latest_version} disponível!`, 4000);
+      if (corner) {
+        if ($("ucVer")) $("ucVer").textContent = res.latest_version;
+        if ($("ucSub")) $("ucSub").textContent = "Instalada: v" + res.current_version;
+        corner.style.display = "flex";
+      }
+      if (interactive) toast(`Nova versão ${res.latest_version} disponível!`, 4000);
     } else {
+      if (corner) corner.style.display = "none";
       if (statusEl) statusEl.innerHTML = `<span style="color:#16a34a; font-weight:600;">✅ Você já está utilizando a versão mais recente (v${escapeHtml(res.current_version)}).</span>`;
-      actionArea.style.display = "none";
-      if (showToastIfCurrent) toast("O Muesli já está na versão mais recente!");
+      if (actionArea) actionArea.style.display = "none";
+      if (interactive) toast("O Muesli já está na versão mais recente!");
     }
   } catch (e) {
-    if (statusEl) statusEl.textContent = "Erro ao checar atualizações: " + (e.message || e);
+    if (interactive && statusEl) {
+      statusEl.textContent = "Erro ao checar atualizações: " + (e.message || e);
+    }
   }
 }
 
@@ -1226,7 +1258,7 @@ async function boot() {
     await refreshStatus();
     setInterval(refreshStatus, 5000);
     toast("Muesli pronto para uso!", 2000);
-    setTimeout(() => checkUpdatesUi(false), 3000);
+    setTimeout(() => checkUpdatesUi(false), 1200);
   } catch (err) {
     console.error("Erro durante inicialização:", err);
     state.booted = false; // permite tentar novamente se falhou

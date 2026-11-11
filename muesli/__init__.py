@@ -1,2 +1,2 @@
 APP_NAME = "Muesli"
-APP_VERSION = "1.4.1"
+APP_VERSION = "1.4.2"

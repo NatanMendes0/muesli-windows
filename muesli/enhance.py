@@ -24,7 +24,15 @@ no nor so too very can will just should would could may might must shall about i
 further once more most other some such only own same than up down out off all any both each few because
 until against during before after above below between through don didn t s ll re ve d m won isn aren
 yeah yes ok okay right well like know think going gonna get got let lets um uh hmm mm really actually
-say said one two also kind sort thing things stuff want wanted make sure bit lot little maybe""".split())
+say said one two also kind sort thing things stuff want wanted make sure bit lot little maybe
+que para com uma uns umas não nao então entao isso aqui você voce está esta tá ta né ne aí ai
+gente vamos fazer coisa tipo bem sim mais muito como por pra pro dos das nos nas num numa pelo pela
+esse essa esses essas este esta estes estas ele ela eles elas meu minha meus minhas seu sua seus suas
+nosso nossa nossos nossas ter ser foi vai vou tem pode posso aqui ali lá la mas porque pois quando onde
+sobre entre ainda agora depois antes hoje amanhã ontem assim também tambem já ja só so tudo nada cada
+todo toda todos todas outro outra outros outras mesmo mesma falar falando disse fala acho achar olhar
+ver saber querer quero quer ficar ficou dar deu entender entendi certo certa beleza tranquilo cara
+galera pessoal olha entendeu bom boa são sao era estava estou ficar fazer feito""".split())
 
 
 # ---------------------------------------------------------------- LLM router
@@ -323,7 +331,7 @@ def enhance(meeting: dict, segments: list, template: dict):
 # --------------------------------------------------------- extractive fallback
 
 def _words(text: str):
-    return [w for w in re.findall(r"[a-zA-Z][a-zA-Z'-]+", text.lower())
+    return [w for w in re.findall(r"[a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ0-9'-]+", text.lower())
             if w not in STOPWORDS and len(w) > 2]
 
 
@@ -413,9 +421,43 @@ def extractive_enhance(meeting: dict, segments: list, template: dict) -> str:
 
 # ------------------------------------------------------------------ title poke
 
+TITLE_SYSTEM = (
+    "Você cria títulos curtos, claros e descritivos para reuniões em português brasileiro.\n"
+    "Regras:\n"
+    "- Responda APENAS com o título da reunião (entre 3 e 7 palavras).\n"
+    "- Foque no tema, projeto, sistema ou decisão central discutida.\n"
+    "- Nunca use aspas, ponto final, marcações Markdown (#, *), prefixos como 'Título:' nem explicações."
+)
+
+
+def suggest_title_with_llm(meeting: dict, segments: list, summary_md: str = "") -> str:
+    """Generate a meaningful meeting title using the currently configured LLM."""
+    notes = (meeting.get("notes_md") or "").strip()
+    summary = (summary_md or "").strip()
+    snippet = format_transcript(segments[:25]) if segments else ""
+    if not summary and not notes and not snippet:
+        return ""
+    parts = []
+    if summary:
+        parts.append("Resumo aprimorado da reunião:\n" + summary[:3500])
+    if notes:
+        parts.append("Anotações do usuário:\n" + notes[:1000])
+    if snippet and len(summary) < 400:
+        parts.append("Trecho da transcrição:\n" + snippet[:2000])
+    text, _ = llm_complete(TITLE_SYSTEM, "\n\n".join(parts))
+    if not text:
+        return ""
+    title = text.splitlines()[0].strip(" \"'`*•.-:")
+    title = re.sub(r"^(?:t[ií]tulo\s*:\s*|#\s*)+", "", title, flags=re.I)
+    title = title.strip(" \"'`*•.-:")
+    if len(title) > 90:
+        title = title[:87].rsplit(" ", 1)[0].strip() + "..."
+    return title
+
+
 def suggest_title(segments: list) -> str:
-    """Cheap title from the first minute of conversation, no LLM required."""
-    text = " ".join(s["text"] for s in segments[:6])
+    """Cheap title from conversation keywords when no LLM is available."""
+    text = " ".join(s["text"] for s in segments[:15])
     ws = _words(text)
     common = [w for w, _ in Counter(ws).most_common(4)]
     if not common:

@@ -83,10 +83,10 @@ class Api:
             try:
                 duration = sess.stop()
                 m = db.get_meeting(sess.meeting_id)
-                if m and m["title"] == "Untitled meeting":
+                if m and (not m.get("title_manual") or m["title"] == "Untitled meeting"):
                     guess = enhance.suggest_title(db.get_segments(sess.meeting_id))
                     if guess:
-                        db.update_meeting(sess.meeting_id, title=guess)
+                        db.update_meeting(sess.meeting_id, title=guess, title_manual=0)
                 self._jobs[job_id].update(state="done", done_at=time.time(),
                                           result={"meeting_id": sess.meeting_id,
                                                   "duration": duration})
@@ -120,8 +120,10 @@ class Api:
         return {"ok": True}
 
     def rename_meeting(self, meeting_id, title):
+        clean = (title or "").strip()
         db.update_meeting(int(meeting_id),
-                          title=(title or "").strip() or "Untitled meeting")
+                          title=clean or "Untitled meeting",
+                          title_manual=1 if clean else 0)
         return {"ok": True}
 
     def set_meeting_template(self, meeting_id, template_id):
@@ -150,11 +152,20 @@ class Api:
                 segs = db.get_segments(meeting_id)
                 tpl = templates.get(template_id or m.get("template_id") or "auto")
                 md, provider = enhance.enhance(m, segs, tpl)
-                db.update_meeting(meeting_id, summary_md=md, summary_provider=provider,
-                                  template_id=tpl["id"])
+                new_title = (m.get("title") or "Untitled meeting") if m else "Untitled meeting"
+                if m and (not m.get("title_manual") or new_title in ("Untitled meeting", "")):
+                    ai_title = ""
+                    if provider not in ("extractive", "none", ""):
+                        ai_title = enhance.suggest_title_with_llm(m, segs, md)
+                    if not ai_title and new_title in ("Untitled meeting", ""):
+                        ai_title = enhance.suggest_title(segs)
+                    if ai_title:
+                        new_title = ai_title
+                db.update_meeting(meeting_id, title=new_title, summary_md=md,
+                                  summary_provider=provider, template_id=tpl["id"])
                 self._jobs[job_id].update(state="done", done_at=time.time(),
                                          result={"summary_md": md, "provider": provider,
-                                                 "meeting_id": meeting_id})
+                                                 "meeting_id": meeting_id, "title": new_title})
             except Exception as e:
                 self._jobs[job_id].update(state="error", error=str(e), done_at=time.time())
 
@@ -490,50 +501,71 @@ tags: [reuniao/executiva]
     # ------------------------------------------------------------- updates
 
     def check_updates(self):
+        def parse_ver(tag_str):
+            clean = tag_str.lstrip("v").strip()
+            res = []
+            for p in clean.split("."):
+                try:
+                    res.append(int(p))
+                except ValueError:
+                    res.append(0)
+            return res
+
         try:
             url = "https://api.github.com/repos/NatanMendes0/muesli-windows/releases/latest"
             headers = {"User-Agent": f"Muesli-App/{APP_VERSION}"}
             try:
                 r = requests.get(url, timeout=10, headers=headers)
             except requests.exceptions.SSLError:
-                # Fallback para ambientes corporativos com proxy/firewall com certificado interno
                 r = requests.get(url, timeout=10, headers=headers, verify=False)
 
-            if r.status_code != 200:
-                return {"ok": False, "error": f"Status HTTP {r.status_code}"}
-            data = r.json()
-            latest_tag = (data.get("tag_name") or "").strip()
+            if r.status_code == 200:
+                data = r.json()
+                latest_tag = (data.get("tag_name") or "").strip()
+                has_update = parse_ver(latest_tag) > parse_ver(APP_VERSION)
+                zip_url = ""
+                zip_name = f"Muesli-windows-{latest_tag}.zip"
+                for asset in data.get("assets", []):
+                    if asset.get("name", "").endswith(".zip"):
+                        zip_url = asset.get("browser_download_url", "")
+                        zip_name = asset.get("name", zip_name)
+                        break
 
-            def parse_ver(tag_str):
-                clean = tag_str.lstrip("v").strip()
-                res = []
-                for p in clean.split("."):
-                    try:
-                        res.append(int(p))
-                    except ValueError:
-                        res.append(0)
-                return res
+                return {
+                    "ok": True,
+                    "current_version": APP_VERSION,
+                    "latest_version": latest_tag,
+                    "has_update": has_update,
+                    "release_name": data.get("name") or latest_tag,
+                    "release_notes": data.get("body") or "Atualizações e correções de estabilidade.",
+                    "html_url": data.get("html_url") or "https://github.com/NatanMendes0/muesli-windows/releases",
+                    "zip_url": zip_url or data.get("html_url", ""),
+                    "zip_name": zip_name,
+                }
 
-            has_update = parse_ver(latest_tag) > parse_ver(APP_VERSION)
-            zip_url = ""
-            zip_name = f"Muesli-windows-{latest_tag}.zip"
-            for asset in data.get("assets", []):
-                if asset.get("name", "").endswith(".zip"):
-                    zip_url = asset.get("browser_download_url", "")
-                    zip_name = asset.get("name", zip_name)
-                    break
+            # Fallback via redirect HTML caso api.github.com retorne 403 (rate limit em IP corporativo)
+            web_url = "https://github.com/NatanMendes0/muesli-windows/releases/latest"
+            try:
+                rw = requests.get(web_url, timeout=10, headers=headers, allow_redirects=False)
+            except requests.exceptions.SSLError:
+                rw = requests.get(web_url, timeout=10, headers=headers, allow_redirects=False, verify=False)
+            loc = rw.headers.get("Location") or ""
+            if "/releases/tag/" in loc:
+                latest_tag = loc.rstrip("/").split("/releases/tag/")[-1].strip()
+                has_update = parse_ver(latest_tag) > parse_ver(APP_VERSION)
+                return {
+                    "ok": True,
+                    "current_version": APP_VERSION,
+                    "latest_version": latest_tag,
+                    "has_update": has_update,
+                    "release_name": latest_tag,
+                    "release_notes": "Nova versão disponível no GitHub Releases.",
+                    "html_url": loc,
+                    "zip_url": f"https://github.com/NatanMendes0/muesli-windows/releases/download/{latest_tag}/Muesli-windows-x64.zip",
+                    "zip_name": "Muesli-windows-x64.zip",
+                }
 
-            return {
-                "ok": True,
-                "current_version": APP_VERSION,
-                "latest_version": latest_tag,
-                "has_update": has_update,
-                "release_name": data.get("name") or latest_tag,
-                "release_notes": data.get("body") or "Atualizações e correções de estabilidade.",
-                "html_url": data.get("html_url") or "https://github.com/NatanMendes0/muesli-windows/releases",
-                "zip_url": zip_url or data.get("html_url", ""),
-                "zip_name": zip_name
-            }
+            return {"ok": False, "error": f"Status HTTP {r.status_code}"}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
