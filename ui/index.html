@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>Muesli v1.3.1</title>
+<title>Muesli v1.4.0</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -20,7 +20,7 @@
         <path d="M13.5 7.5 c0 -1.2 1 -1.2 1 -2.4"/>
       </svg>
       <span class="name">Muesli</span>
-      <span style="font-size:10px; font-weight:700; color:#1e40af; background:#dbeafe; border-radius:4px; padding:1px 5px; margin-left:6px;">v1.3.1</span>
+      <span style="font-size:10px; font-weight:700; color:#1e40af; background:#dbeafe; border-radius:4px; padding:1px 5px; margin-left:6px;">v1.4.0</span>
     </div>
 
     <button class="btn-new" id="btnNew"><span class="dot"></span><span id="btnNewLabel">Nova reunião</span></button>
@@ -201,26 +201,9 @@
             <label>Motor de Transcrição</label>
             <select id="setSttEngine">
               <option value="local">Whisper Local (gratuito, offline e privado)</option>
-              <option value="openai">API da OpenAI (requer chave)</option>
-              <option value="groq">API da Groq (requer chave)</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>Tamanho do Modelo Whisper</label>
-            <select id="setSttModel">
-              <option value="tiny">tiny (mais rápido, menor precisão)</option>
-              <option value="base">base (padrão - rápido e leve)</option>
-              <option value="small">small (mais preciso)</option>
-              <option value="medium">medium (alta precisão em CPU)</option>
-              <option value="large-v3-turbo">large-v3-turbo (máxima precisão / PT-BR - ~1.5 GB)</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>Aceleração de Hardware (Processamento)</label>
-            <select id="setSttDevice">
-              <option value="cpu">CPU (Processador - Padrão universal para qualquer PC)</option>
-              <option value="cuda">GPU NVIDIA (Placa de vídeo dedicada via CUDA)</option>
-              <option value="auto">Automático (Usar GPU NVIDIA se disponível)</option>
+              <option value="openrouter">OpenRouter (Whisper / STT na nuvem — requer chave)</option>
+              <option value="openai">API da OpenAI (Whisper — requer chave)</option>
+              <option value="groq">API da Groq (Whisper — requer chave)</option>
             </select>
           </div>
           <div class="field">
@@ -238,7 +221,104 @@
             </select>
           </div>
         </div>
-        <div class="hint">Dica: Se a máquina possui placa de vídeo NVIDIA (GeForce / RTX / GTX), selecione "GPU NVIDIA" para transcrição ultrarrápida. Se não for detectada, o Muesli alterna com segurança para a CPU.</div>
+
+        <div id="sttLocalBox">
+          <div class="two-col">
+            <div class="field">
+              <label>Tamanho do Modelo Whisper (Local)</label>
+              <select id="setSttModel">
+                <option value="tiny">tiny (mais rápido, menor precisão)</option>
+                <option value="base">base (padrão - rápido e leve)</option>
+                <option value="small">small (mais preciso)</option>
+                <option value="medium">medium (alta precisão em CPU)</option>
+                <option value="large-v3-turbo">large-v3-turbo (máxima precisão / PT-BR - ~1.5 GB)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Aceleração de Hardware (Processamento)</label>
+              <select id="setSttDevice">
+                <option value="cpu">CPU (Processador - Padrão universal para qualquer PC)</option>
+                <option value="cuda">GPU NVIDIA (Placa de vídeo dedicada via CUDA)</option>
+                <option value="auto">Automático (Usar GPU NVIDIA se disponível)</option>
+              </select>
+            </div>
+          </div>
+          <div class="hint">Dica: Para rodar sem peso no seu computador usando modelos Whisper em nuvem, troque "Motor de Transcrição" acima para <b>OpenRouter</b>.</div>
+        </div>
+
+        <div id="sttOpenrouterBox" style="display:none; background:var(--panel-soft); border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:14px;">
+          <div class="field">
+            <label>Chave de API do OpenRouter (Whisper / STT)</label>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <input type="password" id="setSttOpenrouterKey" placeholder="sk-or-v1-…" autocomplete="off" style="flex:1;">
+              <button type="button" class="btn-plain" id="btnToggleOrKey" title="Mostrar ou ocultar chave" style="padding:8px 10px;">👁</button>
+              <button type="button" class="btn-plain" id="btnTestOrKey" style="font-weight:600;">Testar chave</button>
+            </div>
+            <div class="hint" id="orKeyTestStatus">Crie ou copie sua chave em <code>openrouter.ai/settings/keys</code>. Transcreve na nuvem sem consumir CPU/GPU local.</div>
+          </div>
+          <div class="field" style="margin-bottom:8px;">
+            <label>Modelo Whisper / STT no OpenRouter</label>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <select id="setSttOpenrouterModel" style="flex:1;">
+                <option value="openai/whisper-large-v3-turbo">openai/whisper-large-v3-turbo (Recomendado PT-BR — rápido e econômico)</option>
+                <option value="openai/whisper-large-v3">openai/whisper-large-v3 (Máxima precisão)</option>
+                <option value="openai/whisper-1">openai/whisper-1 (Whisper clássico OpenAI)</option>
+                <option value="openai/gpt-4o-transcribe">openai/gpt-4o-transcribe (GPT-4o Transcribe)</option>
+                <option value="openai/gpt-4o-mini-transcribe">openai/gpt-4o-mini-transcribe (GPT-4o Mini Transcribe)</option>
+                <option value="deepgram/nova-3">deepgram/nova-3 (Deepgram Nova-3)</option>
+                <option value="google/gemini-3.5-transcribe">google/gemini-3.5-transcribe (Gemini 3.5 Transcribe)</option>
+                <option value="nvidia/parakeet-tdt-0.6b-v3">nvidia/parakeet-tdt-0.6b-v3 (NVIDIA Parakeet)</option>
+                <option value="nvidia/nemotron-3.5-transcribe">nvidia/nemotron-3.5-transcribe (NVIDIA Nemotron 3.5)</option>
+                <option value="__custom__">Outro modelo do OpenRouter (digitar ID manualmente)…</option>
+              </select>
+              <button type="button" class="btn-plain" id="btnRefreshOrModels" title="Buscar todos os modelos de transcrição ativos no OpenRouter">↻ Atualizar lista</button>
+            </div>
+          </div>
+          <div class="field" id="sttOrCustomModelWrap" style="display:none; margin-bottom:6px;">
+            <label>ID personalizado do modelo no OpenRouter</label>
+            <input type="text" id="setSttOpenrouterCustomModel" placeholder="ex.: openai/whisper-large-v3-turbo">
+          </div>
+        </div>
+
+        <div id="sttOpenaiBox" style="display:none; background:var(--panel-soft); border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:14px;">
+          <div class="two-col">
+            <div class="field" style="margin-bottom:0;">
+              <label>Chave de API OpenAI (Whisper)</label>
+              <input type="password" id="setSttOpenaiKey" placeholder="sk-… (ou usa a chave de Modelos de IA)" autocomplete="off">
+            </div>
+            <div class="field" style="margin-bottom:0;">
+              <label>Modelo OpenAI STT</label>
+              <select id="setSttOpenaiModel">
+                <option value="whisper-1">whisper-1 (padrão)</option>
+                <option value="gpt-4o-transcribe">gpt-4o-transcribe</option>
+                <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div id="sttGroqBox" style="display:none; background:var(--panel-soft); border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:14px;">
+          <div class="two-col">
+            <div class="field" style="margin-bottom:0;">
+              <label>Chave de API Groq (Whisper)</label>
+              <input type="password" id="setSttGroqKey" placeholder="gsk_… (ou usa a chave de Modelos de IA)" autocomplete="off">
+            </div>
+            <div class="field" style="margin-bottom:0;">
+              <label>Modelo Groq Whisper</label>
+              <select id="setSttGroqModel">
+                <option value="whisper-large-v3-turbo">whisper-large-v3-turbo (recomendado)</option>
+                <option value="whisper-large-v3">whisper-large-v3</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div id="sttCloudFallbackWrap" style="display:none;">
+          <div class="check-row">
+            <input type="checkbox" id="setSttCloudFallback">
+            <label for="setSttCloudFallback">Se a API na nuvem falhar ou ficar sem internet, alternar para o Whisper local automaticamente (não perde a reunião)</label>
+          </div>
+        </div>
       </div>
 
       <div class="set-section" data-set="ai">
@@ -247,6 +327,7 @@
           <select id="setLlmProvider">
             <option value="auto">Automático (chaves de API > Ollama local > Sumarizador integrado)</option>
             <option value="ollama">Ollama (100% local e gratuito)</option>
+            <option value="openrouter">OpenRouter (Vários modelos com 1 chave)</option>
             <option value="anthropic">Anthropic (Claude)</option>
             <option value="openai">OpenAI (ChatGPT)</option>
             <option value="groq">Groq</option>
@@ -265,6 +346,14 @@
           </div>
         </div>
         <div class="two-col">
+          <div class="field">
+            <label>Chave de API OpenRouter (opcional)</label>
+            <input type="password" id="setKeyOpenrouter" placeholder="sk-or-v1-…" autocomplete="off">
+          </div>
+          <div class="field">
+            <label>Modelo OpenRouter (Resumo/Chat)</label>
+            <input type="text" id="setModelOpenrouter" placeholder="openai/gpt-4o-mini">
+          </div>
           <div class="field">
             <label>Chave de API Anthropic (opcional)</label>
             <input type="password" id="setKeyAnthropic" placeholder="sk-ant-…" autocomplete="off">
@@ -315,7 +404,7 @@
         <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
           <div>
             <div style="font-size:14px; font-weight:700; color:var(--ink);">Muesli para Windows</div>
-            <div style="font-size:12.5px; color:var(--muted);" id="updateCurrentVer">Versão instalada: v1.3.1</div>
+            <div style="font-size:12.5px; color:var(--muted);" id="updateCurrentVer">Versão instalada: v1.4.0</div>
           </div>
           <span style="flex:1"></span>
           <button class="btn-plain" id="btnCheckUpdatesNow" style="padding:8px 16px; font-weight:600;">
@@ -346,6 +435,10 @@
         <div class="check-row">
           <input type="checkbox" id="setStartup">
           <label for="setStartup">Iniciar o Muesli junto com o Windows (minimizado na bandeja)</label>
+        </div>
+        <div class="check-row">
+          <input type="checkbox" id="setDisableUiGpu">
+          <label for="setDisableUiGpu">Modo econômico de interface (desativar aceleração GPU da janela — reduz uso da GPU Intel; requer reiniciar)</label>
         </div>
         <div class="check-row">
           <input type="checkbox" id="setConsent">

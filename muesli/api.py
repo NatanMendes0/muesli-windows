@@ -348,18 +348,25 @@ tags: [reuniao/executiva]
     def get_settings(self):
         s = settings.load()
         # Never leak more than a hint of stored keys back to the UI.
-        red = {k: ("*" * 8 + v[-4:] if v else "")
-               for k, v in s["llm"].items() if k.endswith("_key")}
-        out = {**s, "llm": {**s["llm"], **red}}
+        red_llm = {k: ("*" * 8 + v[-4:] if v else "")
+                   for k, v in s["llm"].items() if k.endswith("_key")}
+        red_stt = {k: ("*" * 8 + v[-4:] if v else "")
+                   for k, v in s["stt"].items() if k.endswith("_key")}
+        out = {
+            **s,
+            "llm": {**s["llm"], **red_llm},
+            "stt": {**s["stt"], **red_stt},
+        }
         out["launch_at_startup"] = settings.get_launch_at_startup()
         return out
 
     def save_settings(self, patch):
         patch = patch or {}
-        llm = patch.get("llm") or {}
-        for k in list(llm.keys()):
-            if k.endswith("_key") and llm[k].startswith("********"):
-                llm.pop(k)  # unchanged masked value
+        for section in ("llm", "stt"):
+            sub = patch.get(section) or {}
+            for k in list(sub.keys()):
+                if k.endswith("_key") and isinstance(sub[k], str) and sub[k].startswith("********"):
+                    sub.pop(k)  # unchanged masked value
         warning = ""
         if "launch_at_startup" in patch:
             try:
@@ -368,7 +375,59 @@ tags: [reuniao/executiva]
                 patch.pop("launch_at_startup", None)
                 warning = f"Could not change launch at startup: {e}"
         settings.save(patch)
+        stt.reset_status()
         return {"ok": True, "warning": warning}
+
+    def test_openrouter_key(self, raw_key=""):
+        key = (raw_key or "").strip()
+        if not key or key.startswith("********"):
+            s = settings.load()
+            key = (s["stt"].get("openrouter_key") or s["llm"].get("openrouter_key") or "").strip()
+        if not key:
+            return {"ok": False, "error": "Informe uma chave de API do OpenRouter primeiro."}
+        try:
+            url = "https://openrouter.ai/api/v1/key"
+            headers = {"Authorization": f"Bearer {key}"}
+            try:
+                r = requests.get(url, headers=headers, timeout=10)
+            except requests.exceptions.SSLError:
+                r = requests.get(url, headers=headers, timeout=10, verify=False)
+            if r.status_code != 200:
+                msg = stt._extract_api_error(r)
+                return {"ok": False, "error": f"HTTP {r.status_code}: {msg}"}
+            d = r.json().get("data") or {}
+            return {
+                "ok": True,
+                "label": d.get("label", ""),
+                "limit": d.get("limit"),
+                "limit_remaining": d.get("limit_remaining"),
+                "usage": d.get("usage", 0),
+                "is_free_tier": d.get("is_free_tier", False),
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def list_openrouter_stt_models(self):
+        try:
+            url = "https://openrouter.ai/api/v1/models?output_modalities=transcription"
+            headers = {"User-Agent": f"Muesli-App/{APP_VERSION}"}
+            try:
+                r = requests.get(url, headers=headers, timeout=12)
+            except requests.exceptions.SSLError:
+                r = requests.get(url, headers=headers, timeout=12, verify=False)
+            if r.status_code != 200:
+                return {"ok": False, "error": f"HTTP {r.status_code}"}
+            items = r.json().get("data") or []
+            models = []
+            for m in items:
+                mid = (m.get("id") or "").strip()
+                if not mid:
+                    continue
+                models.append({"id": mid, "name": (m.get("name") or mid).strip()})
+            models.sort(key=lambda x: (0 if "whisper" in x["id"].lower() else 1, x["id"]))
+            return {"ok": True, "models": models}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     def list_audio_devices(self):
         return audio.list_devices()

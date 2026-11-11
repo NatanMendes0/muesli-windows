@@ -239,7 +239,7 @@ function renderEnhanced(md, provider) {
     return;
   }
   const provNames = { ollama: "IA Local (Ollama)", extractive: "sumarizador integrado (offline)",
-                      anthropic: "Anthropic (Claude)", openai: "OpenAI (ChatGPT)", groq: "Groq" };
+                      openrouter: "OpenRouter", anthropic: "Anthropic (Claude)", openai: "OpenAI (ChatGPT)", groq: "Groq" };
   body.innerHTML = `<div class="provider-tag">Gerado com ${provNames[provider] || provider || "IA"}</div>` +
                    renderMd(md);
 }
@@ -339,9 +339,9 @@ function startPolling() {
       const el = Math.floor(s.elapsed || 0);
       $("recTime").textContent =
         String(Math.floor(el / 60)).padStart(2, "0") + ":" + String(el % 60).padStart(2, "0");
-      // meters (rms 0..~0.3 mapped to 0..100)
-      $("meterMic").style.width = Math.min(100, (s.levels.mic || 0) * 400) + "%";
-      $("meterLoop").style.width = Math.min(100, (s.levels.loop || 0) * 400) + "%";
+      // meters (rms 0..~0.3 mapped to 0..1 via scaleX to avoid layout reflow)
+      $("meterMic").style.transform = `scaleX(${Math.min(1, (s.levels.mic || 0) * 4)})`;
+      $("meterLoop").style.transform = `scaleX(${Math.min(1, (s.levels.loop || 0) * 4)})`;
       const tr = $("trStatus");
       if (tr) {
         if (s.model && s.model.state === "loading") tr.textContent = s.model.detail + "…";
@@ -492,6 +492,19 @@ async function flushNotes() {
 }
 
 /* ----------------------------------------------------------- settings */
+function syncSttUi() {
+  const eng = $("setSttEngine")?.value || "local";
+  if ($("sttLocalBox")) $("sttLocalBox").style.display = eng === "local" ? "block" : "none";
+  if ($("sttOpenrouterBox")) $("sttOpenrouterBox").style.display = eng === "openrouter" ? "block" : "none";
+  if ($("sttOpenaiBox")) $("sttOpenaiBox").style.display = eng === "openai" ? "block" : "none";
+  if ($("sttGroqBox")) $("sttGroqBox").style.display = eng === "groq" ? "block" : "none";
+  if ($("sttCloudFallbackWrap")) $("sttCloudFallbackWrap").style.display = eng !== "local" ? "block" : "none";
+  const orSel = $("setSttOpenrouterModel");
+  if ($("sttOrCustomModelWrap") && orSel) {
+    $("sttOrCustomModelWrap").style.display = orSel.value === "__custom__" ? "block" : "none";
+  }
+}
+
 async function openSettings() {
   if (!isApiReady()) {
     toast("Aguardando inicialização do backend para abrir configurações...", 3500);
@@ -520,10 +533,32 @@ async function openSettings() {
     if (!devs.ok) toast("Problema de áudio: " + devs.error, 5000);
     $("setRetain").checked = !!s.audio.retain_audio;
     // stt
-    $("setSttEngine").value = s.stt.engine;
-    $("setSttModel").value = s.stt.model;
+    $("setSttEngine").value = s.stt.engine || "local";
+    $("setSttModel").value = s.stt.model || "base";
     if ($("setSttDevice")) $("setSttDevice").value = s.stt.device || "cpu";
     $("setSttLang").value = s.stt.language || "";
+    if ($("setSttOpenrouterKey")) $("setSttOpenrouterKey").value = s.stt.openrouter_key || "";
+    if ($("setSttOpenaiKey")) $("setSttOpenaiKey").value = s.stt.openai_key || "";
+    if ($("setSttOpenaiModel")) $("setSttOpenaiModel").value = s.stt.openai_model || "whisper-1";
+    if ($("setSttGroqKey")) $("setSttGroqKey").value = s.stt.groq_key || "";
+    if ($("setSttGroqModel")) $("setSttGroqModel").value = s.stt.groq_model || "whisper-large-v3-turbo";
+    if ($("setSttCloudFallback")) $("setSttCloudFallback").checked = s.stt.cloud_fallback !== false;
+    if ($("orKeyTestStatus")) {
+      $("orKeyTestStatus").innerHTML = 'Crie ou copie sua chave em <code>openrouter.ai/settings/keys</code>. Transcreve na nuvem sem consumir CPU/GPU local.';
+    }
+    const orSel = $("setSttOpenrouterModel");
+    if (orSel) {
+      const savedOrModel = s.stt.openrouter_model || "openai/whisper-large-v3-turbo";
+      const hasOption = [...orSel.options].some(o => o.value === savedOrModel);
+      if (hasOption) {
+        orSel.value = savedOrModel;
+        if ($("setSttOpenrouterCustomModel")) $("setSttOpenrouterCustomModel").value = "";
+      } else {
+        orSel.value = "__custom__";
+        if ($("setSttOpenrouterCustomModel")) $("setSttOpenrouterCustomModel").value = savedOrModel;
+      }
+    }
+    syncSttUi();
     // ai
     $("setLlmProvider").value = s.llm.provider;
     $("setOllamaUrl").value = s.llm.ollama_url;
@@ -539,6 +574,8 @@ async function openSettings() {
     $("ollamaHint").textContent = models.length
       ? `Ollama está ativo com ${models.length} modelo(s).`
       : "Ollama não detectado. Instale de ollama.com para IA local gratuita.";
+    if ($("setKeyOpenrouter")) $("setKeyOpenrouter").value = s.llm.openrouter_key || "";
+    if ($("setModelOpenrouter")) $("setModelOpenrouter").value = s.llm.openrouter_model || "openai/gpt-4o-mini";
     $("setKeyAnthropic").value = s.llm.anthropic_key;
     $("setKeyOpenai").value = s.llm.openai_key;
     $("setKeyGroq").value = s.llm.groq_key;
@@ -547,10 +584,11 @@ async function openSettings() {
     $("setModelGroq").value = s.llm.groq_model;
     // general
     $("setStartup").checked = !!s.launch_at_startup;
+    if ($("setDisableUiGpu")) $("setDisableUiGpu").checked = !!(s.ui && s.ui.disable_gpu);
     $("setConsent").checked = !!s.consent.enabled;
     $("setConsentText").value = s.consent.snippet;
     if ($("updateCurrentVer")) {
-      const v = (state.settingsState && state.settingsState.version) || "1.1.0";
+      const v = (state.settingsState && state.settingsState.version) || "1.4.0";
       $("updateCurrentVer").textContent = "Versão instalada: v" + v;
     }
     renderTplManager();
@@ -561,6 +599,10 @@ async function openSettings() {
 }
 
 async function saveSettings() {
+  let orModel = $("setSttOpenrouterModel") ? $("setSttOpenrouterModel").value : "openai/whisper-large-v3-turbo";
+  if (orModel === "__custom__") {
+    orModel = ($("setSttOpenrouterCustomModel")?.value || "").trim() || "openai/whisper-large-v3-turbo";
+  }
   const patch = {
     audio: {
       mic_device_index: $("setMic").value === "" ? null : parseInt($("setMic").value, 10),
@@ -572,11 +614,20 @@ async function saveSettings() {
       model: $("setSttModel").value,
       device: $("setSttDevice") ? $("setSttDevice").value : "cpu",
       language: $("setSttLang").value,
+      openrouter_key: $("setSttOpenrouterKey") ? $("setSttOpenrouterKey").value.trim() : "",
+      openrouter_model: orModel,
+      openai_key: $("setSttOpenaiKey") ? $("setSttOpenaiKey").value.trim() : "",
+      openai_model: $("setSttOpenaiModel") ? $("setSttOpenaiModel").value : "whisper-1",
+      groq_key: $("setSttGroqKey") ? $("setSttGroqKey").value.trim() : "",
+      groq_model: $("setSttGroqModel") ? $("setSttGroqModel").value : "whisper-large-v3-turbo",
+      cloud_fallback: $("setSttCloudFallback") ? $("setSttCloudFallback").checked : true,
     },
     llm: {
       provider: $("setLlmProvider").value,
       ollama_url: $("setOllamaUrl").value.trim() || "http://localhost:11434",
       ollama_model: $("setOllamaModel").value,
+      openrouter_key: $("setKeyOpenrouter") ? $("setKeyOpenrouter").value.trim() : "",
+      openrouter_model: $("setModelOpenrouter") ? ($("setModelOpenrouter").value.trim() || "openai/gpt-4o-mini") : "openai/gpt-4o-mini",
       anthropic_key: $("setKeyAnthropic").value.trim(),
       openai_key: $("setKeyOpenai").value.trim(),
       groq_key: $("setKeyGroq").value.trim(),
@@ -587,6 +638,9 @@ async function saveSettings() {
     consent: {
       enabled: $("setConsent").checked,
       snippet: $("setConsentText").value,
+    },
+    ui: {
+      disable_gpu: $("setDisableUiGpu") ? $("setDisableUiGpu").checked : false,
     },
     launch_at_startup: $("setStartup").checked,
   };
@@ -701,7 +755,7 @@ async function refreshStatus() {
     if (st.llm.provider) bits.push(`IA: <b>${escapeHtml(st.llm.provider)}</b> (${escapeHtml(st.llm.detail || "")})`);
     else bits.push("IA: sumarizador integrado (offline)");
     if (st.stt_model.state === "loading") bits.push("Whisper: carregando modelo…");
-    else if (st.stt_model.state === "error") bits.push("Whisper: erro no modelo");
+    else if (st.stt_model.state === "error") bits.push(`Whisper: ${escapeHtml(st.stt_model.detail || "erro no modelo")}`);
     else bits.push(`Whisper: ${escapeHtml(st.stt_model.detail || st.stt_model.name || "pronto")}`);
     if (!st.audio_backend_ok) bits.push("Aviso: dispositivo de áudio indisponível");
     $("statusLine").innerHTML = bits.join("<br>");
@@ -829,6 +883,75 @@ function wireEvents() {
   $("btnCancelSettings").addEventListener("click", () => $("settingsModal").classList.remove("visible"));
   $("btnSaveSettings").addEventListener("click", saveSettings);
   $("btnRefreshDevices").addEventListener("click", openSettings);
+  $("setSttEngine")?.addEventListener("change", syncSttUi);
+  $("setSttOpenrouterModel")?.addEventListener("change", syncSttUi);
+  $("btnToggleOrKey")?.addEventListener("click", () => {
+    const inp = $("setSttOpenrouterKey");
+    if (inp) inp.type = inp.type === "password" ? "text" : "password";
+  });
+  $("btnTestOrKey")?.addEventListener("click", async () => {
+    if (!isApiReady()) { toast("Aguarde a conexão com o backend...", 3000); return; }
+    const st = $("orKeyTestStatus");
+    const rawKey = $("setSttOpenrouterKey")?.value || "";
+    if (st) st.innerHTML = 'Validando chave no OpenRouter... <span class="spin"></span>';
+    try {
+      const res = await api().test_openrouter_key(rawKey);
+      if (res.ok) {
+        let info = "✅ Chave OpenRouter válida!";
+        if (res.limit_remaining !== null && res.limit_remaining !== undefined) {
+          info += ` Limite restante: $${Number(res.limit_remaining).toFixed(4)}`;
+        } else {
+          info += ` Uso acumulado: $${Number(res.usage || 0).toFixed(4)}`;
+        }
+        if (st) st.innerHTML = `<span style="color:#16a34a; font-weight:600;">${escapeHtml(info)}</span>`;
+        toast(info, 4000);
+      } else {
+        const errMsg = res.error || "Falha ao validar chave.";
+        if (st) st.innerHTML = `<span style="color:#dc2626; font-weight:600;">❌ ${escapeHtml(errMsg)}</span>`;
+        toast("OpenRouter: " + errMsg, 4000);
+      }
+    } catch (e) {
+      if (st) st.innerHTML = `<span style="color:#dc2626;">❌ Erro: ${escapeHtml(e.message || String(e))}</span>`;
+    }
+  });
+  $("btnRefreshOrModels")?.addEventListener("click", async () => {
+    if (!isApiReady()) { toast("Aguarde a conexão com o backend...", 3000); return; }
+    const sel = $("setSttOpenrouterModel");
+    if (!sel) return;
+    const prev = sel.value === "__custom__" ? ($("setSttOpenrouterCustomModel")?.value || "").trim() : sel.value;
+    toast("Buscando modelos de transcrição do OpenRouter...");
+    try {
+      const res = await api().list_openrouter_stt_models();
+      if (!res.ok) {
+        toast("Erro ao buscar modelos: " + (res.error || ""), 4000);
+        return;
+      }
+      sel.innerHTML = "";
+      for (const m of res.models) {
+        const o = document.createElement("option");
+        o.value = m.id;
+        o.textContent = `${m.id} (${m.name})`;
+        sel.appendChild(o);
+      }
+      const cust = document.createElement("option");
+      cust.value = "__custom__";
+      cust.textContent = "Outro modelo do OpenRouter (digitar ID manualmente)…";
+      sel.appendChild(cust);
+      if (prev && [...sel.options].some(o => o.value === prev)) {
+        sel.value = prev;
+      } else if (prev) {
+        sel.value = "__custom__";
+        if ($("setSttOpenrouterCustomModel")) $("setSttOpenrouterCustomModel").value = prev;
+      }
+      syncSttUi();
+      toast(`${res.models.length} modelos STT carregados do OpenRouter!`);
+    } catch (e) {
+      toast("Erro ao atualizar modelos: " + (e.message || e), 4000);
+    }
+  });
+  document.addEventListener("visibilitychange", () => {
+    document.body.classList.toggle("page-hidden", document.hidden);
+  });
   $("btnOpenData").addEventListener("click", async () => {
     if (!isApiReady()) { toast("Aguarde a conexão com o backend...", 3000); return; }
     try {

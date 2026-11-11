@@ -1,8 +1,11 @@
-"""Speech to text: local faster-whisper by default, OpenAI or Groq Whisper API when a key is set.
+"""Speech to text: local faster-whisper by default, OpenRouter, OpenAI or Groq Whisper API when configured.
 
 The streaming loop pulls mixed audio from the capture session, buffers it, and
 flushes a chunk to the transcriber when it hears a pause (or hits a max length).
 """
+import base64
+import os
+import sys
 import threading
 import time
 
@@ -21,9 +24,87 @@ _model_lock = threading.Lock()
 _model = None
 _model_name = ""
 _model_status = {"state": "idle", "detail": ""}  # idle | loading | ready | error
+_openrouter_no_verbose = set()
+_last_cloud_warning = ""
+
+
+def _cuda_libs_dir():
+    d = os.path.join(settings.data_dir(), "cuda_libs")
+    if os.path.isdir(d):
+        if d not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+        add_dll = getattr(os, "add_dll_directory", None)
+        if add_dll is not None:
+            try:
+                add_dll(d)
+            except OSError:
+                pass
+
+
+_cuda_libs_dir()
+
+
+def _http_with_ssl_fallback(method: str, url: str, **kwargs):
+    fn = requests.get if method == "GET" else requests.post
+    try:
+        return fn(url, **kwargs)
+    except requests.exceptions.SSLError:
+        kwargs["verify"] = False
+        return fn(url, **kwargs)
+
+
+def _extract_api_error(resp) -> str:
+    try:
+        j = resp.json()
+        err = j.get("error")
+        if isinstance(err, dict) and err.get("message"):
+            return str(err["message"])
+        if isinstance(err, str):
+            return err
+        if j.get("message"):
+            return str(j["message"])
+    except Exception:
+        pass
+    txt = (resp.text or "").strip()
+    return txt[:180] if txt else f"HTTP {resp.status_code}"
+
+
+def _resolve_cloud_config(engine: str):
+    all_cfg = settings.load()
+    stt_cfg = all_cfg["stt"]
+    llm_cfg = all_cfg["llm"]
+    if engine == "openrouter":
+        key = (stt_cfg.get("openrouter_key") or llm_cfg.get("openrouter_key") or "").strip()
+        model = (stt_cfg.get("openrouter_model") or "openai/whisper-large-v3-turbo").strip()
+        return key, model
+    if engine == "groq":
+        key = (stt_cfg.get("groq_key") or llm_cfg.get("groq_key") or "").strip()
+        model = (stt_cfg.get("groq_model") or "whisper-large-v3-turbo").strip()
+        return key, model
+    key = (stt_cfg.get("openai_key") or llm_cfg.get("openai_key") or "").strip()
+    model = (stt_cfg.get("openai_model") or "whisper-1").strip()
+    return key, model
+
+
+def reset_status():
+    global _last_cloud_warning
+    _last_cloud_warning = ""
+    if _model_status.get("state") != "loading":
+        _model_status.update(state="idle", detail="")
 
 
 def model_status():
+    cfg = settings.load()["stt"]
+    engine = cfg.get("engine", "local")
+    if engine in ("openrouter", "openai", "groq"):
+        label = {"openrouter": "OpenRouter", "openai": "OpenAI", "groq": "Groq"}[engine]
+        key, model = _resolve_cloud_config(engine)
+        if _model_status["state"] in ("error", "loading"):
+            return dict(_model_status, name=model)
+        if not key:
+            return {"state": "error", "detail": f"{label} sem chave configurada", "name": model}
+        detail = _last_cloud_warning or f"{label}: {model}"
+        return {"state": "ready", "detail": detail, "name": model}
     return dict(_model_status, name=_model_name)
 
 
@@ -43,6 +124,7 @@ def _get_local_model():
         _model_status.update(state="loading",
                              detail=f"Carregando Whisper '{name}' ({wanted_device.upper()})...")
         try:
+            _cuda_libs_dir()
             from faster_whisper import WhisperModel
             model_id = name
             if name in ("large-v3-turbo", "turbo"):
@@ -54,6 +136,7 @@ def _get_local_model():
                     pass
 
             target_device = "cpu"
+            cuda_warn = ""
             if wanted_device in ("cuda", "auto"):
                 can_cuda = False
                 try:
@@ -63,30 +146,37 @@ def _get_local_model():
                     pass
 
                 if can_cuda:
-                    try:
-                        # Em GPUs com 4GB VRAM (como GTX 1650 / RTX 3050), float16 é o padrão ideal
-                        _model = WhisperModel(model_id, device="cuda",
-                                              compute_type="float16",
-                                              download_root=settings.models_dir())
-                        target_device = "cuda"
-                    except Exception:
-                        # Fallback seguro para CPU
-                        _model = WhisperModel(model_id, device="cpu",
-                                              compute_type="int8",
-                                              download_root=settings.models_dir())
-                        target_device = "cpu"
-                else:
+                    # Pascal (CC 6.1, e.g. Quadro P400 / GTX 10xx) runs best with int8_float32/int8;
+                    # newer GPUs (Turing/Ampere+) prefer float16. Try both gracefully.
+                    for ct in ("float16", "int8_float32", "int8"):
+                        try:
+                            _model = WhisperModel(model_id, device="cuda",
+                                                  compute_type=ct,
+                                                  download_root=settings.models_dir())
+                            target_device = "cuda"
+                            break
+                        except Exception as e:
+                            cuda_warn = str(e)
+                            _model = None
+
+                if _model is None:
                     _model = WhisperModel(model_id, device="cpu",
                                           compute_type=cfg.get("compute_type") or "int8",
                                           download_root=settings.models_dir())
+                    target_device = "cpu"
             else:
                 _model = WhisperModel(model_id, device="cpu",
                                       compute_type=cfg.get("compute_type") or "int8",
                                       download_root=settings.models_dir())
 
             _model_name = key
-            hw_info = "GPU NVIDIA (CUDA)" if target_device == "cuda" else "CPU"
-            _model_status.update(state="ready", detail=f"Whisper '{name}' pronto ({hw_info})")
+            if target_device == "cuda":
+                hw_info = "GPU NVIDIA (CUDA)"
+            elif wanted_device == "cuda" and cuda_warn:
+                hw_info = "CPU (CUDA indisponível)"
+            else:
+                hw_info = "CPU"
+            _model_status.update(state="ready", detail=f"Whisper '{name}' ({hw_info})")
             return _model
         except Exception as e:
             _model_status.update(state="error", detail=str(e))
@@ -113,47 +203,157 @@ def _transcribe_local(pcm: np.ndarray, language: str):
     return [(float(s.start), float(s.end), s.text.strip()) for s in segments if s.text.strip()]
 
 
-def _transcribe_cloud(pcm: np.ndarray, engine: str, language: str):
-    cfg = settings.load()["llm"]
-    if engine == "groq":
-        url = "https://api.groq.com/openai/v1/audio/transcriptions"
-        key = cfg.get("groq_key", "")
-        model = "whisper-large-v3-turbo"
-    else:
-        url = "https://api.openai.com/v1/audio/transcriptions"
-        key = cfg.get("openai_key", "")
-        model = "whisper-1"
-    if not key:
-        raise RuntimeError(f"No API key configured for {engine} transcription")
-    data = {"model": model, "response_format": "verbose_json"}
-    if language:
-        data["language"] = language
-    resp = requests.post(
-        url, headers={"Authorization": f"Bearer {key}"},
-        files={"file": ("chunk.wav", audio_mod.wav_bytes(pcm), "audio/wav")},
-        data=data, timeout=60)
-    resp.raise_for_status()
-    body = resp.json()
+def _parse_cloud_segments(body: dict, pcm_size: int):
     out = []
     for s in body.get("segments") or []:
         text = (s.get("text") or "").strip()
         if text:
             out.append((float(s.get("start", 0)), float(s.get("end", 0)), text))
     if not out and (body.get("text") or "").strip():
-        out.append((0.0, pcm.size / audio_mod.TARGET_RATE, body["text"].strip()))
+        out.append((0.0, pcm_size / audio_mod.TARGET_RATE, body["text"].strip()))
     return out
 
 
+def _transcribe_openrouter(pcm: np.ndarray, key: str, model: str, language: str):
+    url = "https://openrouter.ai/api/v1/audio/transcriptions"
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/NatanMendes0/muesli-windows",
+        "X-Title": "Muesli",
+    }
+    b64_audio = base64.b64encode(audio_mod.wav_bytes(pcm)).decode("ascii")
+    payload = {
+        "model": model,
+        "input_audio": {
+            "data": b64_audio,
+            "format": "wav",
+        },
+        "temperature": 0.0,
+    }
+    if language:
+        payload["language"] = language
+    if model not in _openrouter_no_verbose:
+        payload["response_format"] = "verbose_json"
+
+    resp = _http_with_ssl_fallback("POST", url, headers=headers, json=dict(payload), timeout=60)
+    if resp.status_code == 400 and "response_format" in payload:
+        _openrouter_no_verbose.add(model)
+        payload.pop("response_format", None)
+        resp = _http_with_ssl_fallback("POST", url, headers=headers, json=dict(payload), timeout=60)
+
+    if not resp.ok:
+        raise RuntimeError(f"OpenRouter ({resp.status_code}): {_extract_api_error(resp)}")
+    return _parse_cloud_segments(resp.json(), pcm.size)
+
+
+def _transcribe_cloud(pcm: np.ndarray, engine: str, language: str):
+    key, model = _resolve_cloud_config(engine)
+    if not key:
+        raise RuntimeError(f"Chave de API ({engine}) não configurada em Configurações → Transcrição.")
+
+    if engine == "openrouter":
+        return _transcribe_openrouter(pcm, key, model, language)
+
+    if engine == "groq":
+        url = "https://api.groq.com/openai/v1/audio/transcriptions"
+    else:
+        url = "https://api.openai.com/v1/audio/transcriptions"
+
+    data = {"model": model, "response_format": "verbose_json"}
+    if language:
+        data["language"] = language
+    resp = _http_with_ssl_fallback(
+        "POST",
+        url,
+        headers={"Authorization": f"Bearer {key}"},
+        files={"file": ("chunk.wav", audio_mod.wav_bytes(pcm), "audio/wav")},
+        data=data,
+        timeout=60,
+    )
+    if resp.status_code == 400:
+        data.pop("response_format", None)
+        resp = _http_with_ssl_fallback(
+            "POST",
+            url,
+            headers={"Authorization": f"Bearer {key}"},
+            files={"file": ("chunk.wav", audio_mod.wav_bytes(pcm), "audio/wav")},
+            data=data,
+            timeout=60,
+        )
+    if not resp.ok:
+        raise RuntimeError(f"{engine.upper()} ({resp.status_code}): {_extract_api_error(resp)}")
+    return _parse_cloud_segments(resp.json(), pcm.size)
+
+
+def preflight_engine() -> str:
+    """Validate STT readiness at meeting start without sending dummy paid audio."""
+    global _last_cloud_warning
+    _last_cloud_warning = ""
+    cfg = settings.load()["stt"]
+    engine = cfg.get("engine", "local")
+    if engine == "local":
+        _get_local_model()
+        return ""
+
+    label = {"openrouter": "OpenRouter", "openai": "OpenAI", "groq": "Groq"}.get(engine, engine)
+    key, model = _resolve_cloud_config(engine)
+    fallback = cfg.get("cloud_fallback", True)
+
+    if not key:
+        msg = f"Chave de API ({label}) não configurada em Configurações → Transcrição."
+        if fallback:
+            _last_cloud_warning = f"{label} sem chave — usando Whisper local"
+            _get_local_model()
+            return f"Aviso: {msg} Usando Whisper local como reserva."
+        _model_status.update(state="error", detail=msg)
+        raise RuntimeError(msg)
+
+    if engine == "openrouter":
+        try:
+            r = _http_with_ssl_fallback(
+                "GET",
+                "https://openrouter.ai/api/v1/key",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=5,
+            )
+            if r.status_code in (401, 403):
+                raise RuntimeError(f"Chave OpenRouter inválida ou desativada (HTTP {r.status_code}).")
+            if r.status_code == 200:
+                d = r.json().get("data") or {}
+                rem = d.get("limit_remaining")
+                if rem is not None and float(rem) <= 0:
+                    raise RuntimeError("Limite de crédito da chave OpenRouter esgotado ($0 restante).")
+        except RuntimeError as e:
+            if fallback:
+                _last_cloud_warning = f"OpenRouter indisponível ({e}) — usando local"
+                _get_local_model()
+                return f"Aviso OpenRouter: {e} Usando Whisper local como reserva."
+            _model_status.update(state="error", detail=str(e))
+            raise
+        except Exception:
+            pass  # Transient network glitch on preflight; try on first real chunk
+
+    _model_status.update(state="ready", detail=f"{label}: {model}")
+    return ""
+
+
 def transcribe_chunk(pcm: np.ndarray):
-    """Transcribe one chunk with the configured engine, falling back to local."""
+    """Transcribe one chunk with the configured engine, falling back to local if enabled."""
+    global _last_cloud_warning
     cfg = settings.load()["stt"]
     engine = cfg.get("engine", "local")
     language = (cfg.get("language") or "").strip()
-    if engine in ("openai", "groq"):
+    if engine in ("openrouter", "openai", "groq"):
         try:
-            return _transcribe_cloud(pcm, engine, language)
-        except Exception:
-            pass  # fall back to local so the meeting is never lost
+            segs = _transcribe_cloud(pcm, engine, language)
+            _last_cloud_warning = ""
+            return segs
+        except Exception as e:
+            if not cfg.get("cloud_fallback", True):
+                _model_status.update(state="error", detail=str(e))
+                raise
+            _last_cloud_warning = f"Erro {engine} ({e}) — usando local"
     return _transcribe_local(pcm, language)
 
 
@@ -191,21 +391,22 @@ class StreamingTranscriber(threading.Thread):
                 t0, t1 = offset + s0, offset + s1
                 speaker = self.capture.speaker_for(t0, t1)
                 self.on_segment(t0, t1, speaker, text)
+            self.on_status(_last_cloud_warning or "")
         except Exception as e:
             self.error = str(e)
-            self.on_status(f"Transcription error: {e}")
+            self.on_status(f"Erro na transcrição: {e}")
 
     def run(self):
         stt_ok = True
         try:
-            transcribe_chunk(np.zeros(int(audio_mod.TARGET_RATE * 0.5), dtype=np.float32))
-            self.on_status("")
+            warn = preflight_engine()
+            self.on_status(warn or "")
         except Exception as e:
             # Keep consuming audio anyway: pull_mixed is what trims capture
             # buffers and writes the retained WAV, so it must keep running.
             stt_ok = False
             self.error = str(e)
-            self.on_status(f"Transcription unavailable (audio still captured): {e}")
+            self.on_status(f"Transcrição indisponível (áudio ainda está sendo gravado): {e}")
         hop = int(audio_mod.TARGET_RATE * TAIL_SILENCE_SEC)
         while not self.stop_flag.is_set():
             time.sleep(0.35)

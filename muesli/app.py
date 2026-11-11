@@ -5,7 +5,7 @@ import threading
 
 import webview
 
-from . import APP_NAME, APP_VERSION, api as api_mod, db, fonts, icon as icon_mod, stt
+from . import APP_NAME, APP_VERSION, api as api_mod, db, fonts, icon as icon_mod, settings, stt
 
 if getattr(sys, "frozen", False):
     # PyInstaller bundle: data files live under sys._MEIPASS.
@@ -83,6 +83,9 @@ class App:
 
     def run(self):
         db.init()
+        if settings.load().get("ui", {}).get("disable_gpu"):
+            os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+                                  "--disable-gpu --disable-gpu-compositing")
         fonts.ensure_fonts_async(UI_DIR)
         stt.preload_model_async()
         self.window = webview.create_window(
