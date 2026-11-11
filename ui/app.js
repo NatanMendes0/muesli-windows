@@ -194,6 +194,7 @@ function setRecordingUi(on) {
   $("meters").style.display = on ? "flex" : "none";
   $("btnNewLabel").textContent = state.recording ? "Gravando…" : "Nova reunião";
   $("btnNew").classList.toggle("recording", state.recording);
+  if (!on && $("trBatchBar")) $("trBatchBar").style.display = "none";
   const cb = $("consentBanner");
   if (on && state.settings && state.settings.consent && state.settings.consent.enabled) {
     cb.innerHTML = "Lembrete de consentimento: informe aos participantes que você está utilizando um assistente de transcrição. " +
@@ -343,11 +344,27 @@ function startPolling() {
       $("meterMic").style.transform = `scaleX(${Math.min(1, (s.levels.mic || 0) * 4)})`;
       $("meterLoop").style.transform = `scaleX(${Math.min(1, (s.levels.loop || 0) * 4)})`;
       const tr = $("trStatus");
+      const bb = $("trBatchBar");
       if (tr) {
-        if (s.model && s.model.state === "loading") tr.textContent = s.model.detail + "…";
-        else if (s.detail) tr.textContent = s.detail;
-        else if (state.segCount === 0) tr.textContent = "Ouvindo áudio em tempo real…";
-        else tr.textContent = "";
+        if (s.model && s.model.state === "loading") {
+          tr.textContent = s.model.detail + "…";
+          if (bb) bb.style.display = "none";
+        } else if (s.detail) {
+          if (state.segCount > 0 && bb) {
+            tr.textContent = "";
+            bb.textContent = s.detail;
+            bb.style.display = "block";
+          } else {
+            tr.textContent = s.detail;
+            if (bb) bb.style.display = "none";
+          }
+        } else if (state.segCount === 0) {
+          tr.textContent = "Ouvindo áudio em tempo real…";
+          if (bb) bb.style.display = "none";
+        } else {
+          tr.textContent = "";
+          if (bb) bb.style.display = "none";
+        }
       }
       if (s.warnings && s.warnings.length) showWarn(s.warnings.join(" "));
       for (const seg of s.segments) addSegmentEl(seg);
@@ -505,6 +522,53 @@ function syncSttUi() {
   }
 }
 
+function renderKeyList(containerId, keys, placeholder) {
+  const box = $(containerId);
+  if (!box) return;
+  box.innerHTML = "";
+  const arr = Array.isArray(keys) && keys.length ? keys : [""];
+  arr.forEach((k, idx) => appendKeyRow(box, k || "", placeholder, idx + 1));
+}
+
+function appendKeyRow(box, value, placeholder, num) {
+  const row = document.createElement("div");
+  row.className = "key-row";
+  row.innerHTML = `
+    <span class="key-idx">#${num}</span>
+    <input type="password" placeholder="${escapeHtml(placeholder)}" autocomplete="off">
+    <button type="button" class="key-btn eye" title="Mostrar ou ocultar">👁</button>
+    <button type="button" class="key-btn del" title="Remover chave">&times;</button>
+  `;
+  const inp = row.querySelector("input");
+  inp.value = value || "";
+  row.querySelector(".eye").addEventListener("click", () => {
+    inp.type = inp.type === "password" ? "text" : "password";
+  });
+  row.querySelector(".del").addEventListener("click", () => {
+    if (box.querySelectorAll(".key-row").length > 1) {
+      row.remove();
+      box.querySelectorAll(".key-row .key-idx").forEach((el, i) => { el.textContent = `#${i + 1}`; });
+    } else {
+      inp.value = "";
+    }
+  });
+  box.appendChild(row);
+}
+
+function addKeyRow(containerId, placeholder) {
+  const box = $(containerId);
+  if (!box) return;
+  const count = box.querySelectorAll(".key-row").length;
+  appendKeyRow(box, "", placeholder, count + 1);
+  box.querySelector(".key-row:last-child input")?.focus();
+}
+
+function readKeyList(containerId) {
+  const box = $(containerId);
+  if (!box) return [];
+  return [...box.querySelectorAll(".key-row input")].map(i => i.value.trim()).filter(Boolean);
+}
+
 async function openSettings() {
   if (!isApiReady()) {
     toast("Aguardando inicialização do backend para abrir configurações...", 3500);
@@ -537,14 +601,15 @@ async function openSettings() {
     $("setSttModel").value = s.stt.model || "base";
     if ($("setSttDevice")) $("setSttDevice").value = s.stt.device || "cpu";
     $("setSttLang").value = s.stt.language || "";
-    if ($("setSttOpenrouterKey")) $("setSttOpenrouterKey").value = s.stt.openrouter_key || "";
-    if ($("setSttOpenaiKey")) $("setSttOpenaiKey").value = s.stt.openai_key || "";
+    renderKeyList("keysSttOpenrouter", s.stt.openrouter_keys?.length ? s.stt.openrouter_keys : (s.stt.openrouter_key ? [s.stt.openrouter_key] : []), "sk-or-v1-…");
+    renderKeyList("keysSttOpenai", s.stt.openai_keys?.length ? s.stt.openai_keys : (s.stt.openai_key ? [s.stt.openai_key] : []), "sk-… (opcional)");
     if ($("setSttOpenaiModel")) $("setSttOpenaiModel").value = s.stt.openai_model || "whisper-1";
-    if ($("setSttGroqKey")) $("setSttGroqKey").value = s.stt.groq_key || "";
+    renderKeyList("keysSttGroq", s.stt.groq_keys?.length ? s.stt.groq_keys : (s.stt.groq_key ? [s.stt.groq_key] : []), "gsk_… (opcional)");
     if ($("setSttGroqModel")) $("setSttGroqModel").value = s.stt.groq_model || "whisper-large-v3-turbo";
+    if ($("setSttCloudInterval")) $("setSttCloudInterval").value = String(s.stt.cloud_interval_sec || 12);
     if ($("setSttCloudFallback")) $("setSttCloudFallback").checked = s.stt.cloud_fallback !== false;
     if ($("orKeyTestStatus")) {
-      $("orKeyTestStatus").innerHTML = 'Crie ou copie sua chave em <code>openrouter.ai/settings/keys</code>. Transcreve na nuvem sem consumir CPU/GPU local.';
+      $("orKeyTestStatus").innerHTML = 'Adicione uma ou mais chaves de <code>openrouter.ai/settings/keys</code>. Se uma atingir limite ou falhar, o Muesli alterna automaticamente para a próxima.';
     }
     const orSel = $("setSttOpenrouterModel");
     if (orSel) {
@@ -574,11 +639,11 @@ async function openSettings() {
     $("ollamaHint").textContent = models.length
       ? `Ollama está ativo com ${models.length} modelo(s).`
       : "Ollama não detectado. Instale de ollama.com para IA local gratuita.";
-    if ($("setKeyOpenrouter")) $("setKeyOpenrouter").value = s.llm.openrouter_key || "";
+    renderKeyList("keysLlmOpenrouter", s.llm.openrouter_keys?.length ? s.llm.openrouter_keys : (s.llm.openrouter_key ? [s.llm.openrouter_key] : []), "sk-or-v1-…");
     if ($("setModelOpenrouter")) $("setModelOpenrouter").value = s.llm.openrouter_model || "openai/gpt-4o-mini";
-    $("setKeyAnthropic").value = s.llm.anthropic_key;
-    $("setKeyOpenai").value = s.llm.openai_key;
-    $("setKeyGroq").value = s.llm.groq_key;
+    renderKeyList("keysLlmAnthropic", s.llm.anthropic_keys?.length ? s.llm.anthropic_keys : (s.llm.anthropic_key ? [s.llm.anthropic_key] : []), "sk-ant-…");
+    renderKeyList("keysLlmOpenai", s.llm.openai_keys?.length ? s.llm.openai_keys : (s.llm.openai_key ? [s.llm.openai_key] : []), "sk-…");
+    renderKeyList("keysLlmGroq", s.llm.groq_keys?.length ? s.llm.groq_keys : (s.llm.groq_key ? [s.llm.groq_key] : []), "gsk_…");
     $("setModelAnthropic").value = s.llm.anthropic_model;
     $("setModelOpenai").value = s.llm.openai_model;
     $("setModelGroq").value = s.llm.groq_model;
@@ -588,7 +653,7 @@ async function openSettings() {
     $("setConsent").checked = !!s.consent.enabled;
     $("setConsentText").value = s.consent.snippet;
     if ($("updateCurrentVer")) {
-      const v = (state.settingsState && state.settingsState.version) || "1.4.0";
+      const v = (state.settingsState && state.settingsState.version) || "1.4.1";
       $("updateCurrentVer").textContent = "Versão instalada: v" + v;
     }
     renderTplManager();
@@ -603,6 +668,14 @@ async function saveSettings() {
   if (orModel === "__custom__") {
     orModel = ($("setSttOpenrouterCustomModel")?.value || "").trim() || "openai/whisper-large-v3-turbo";
   }
+  const sttOrKeys = readKeyList("keysSttOpenrouter");
+  const sttOpenaiKeys = readKeyList("keysSttOpenai");
+  const sttGroqKeys = readKeyList("keysSttGroq");
+  const llmOrKeys = readKeyList("keysLlmOpenrouter");
+  const llmAnthKeys = readKeyList("keysLlmAnthropic");
+  const llmOpenaiKeys = readKeyList("keysLlmOpenai");
+  const llmGroqKeys = readKeyList("keysLlmGroq");
+
   const patch = {
     audio: {
       mic_device_index: $("setMic").value === "" ? null : parseInt($("setMic").value, 10),
@@ -614,23 +687,31 @@ async function saveSettings() {
       model: $("setSttModel").value,
       device: $("setSttDevice") ? $("setSttDevice").value : "cpu",
       language: $("setSttLang").value,
-      openrouter_key: $("setSttOpenrouterKey") ? $("setSttOpenrouterKey").value.trim() : "",
+      openrouter_key: sttOrKeys[0] || "",
+      openrouter_keys: sttOrKeys,
       openrouter_model: orModel,
-      openai_key: $("setSttOpenaiKey") ? $("setSttOpenaiKey").value.trim() : "",
+      openai_key: sttOpenaiKeys[0] || "",
+      openai_keys: sttOpenaiKeys,
       openai_model: $("setSttOpenaiModel") ? $("setSttOpenaiModel").value : "whisper-1",
-      groq_key: $("setSttGroqKey") ? $("setSttGroqKey").value.trim() : "",
+      groq_key: sttGroqKeys[0] || "",
+      groq_keys: sttGroqKeys,
       groq_model: $("setSttGroqModel") ? $("setSttGroqModel").value : "whisper-large-v3-turbo",
+      cloud_interval_sec: $("setSttCloudInterval") ? parseInt($("setSttCloudInterval").value, 10) || 12 : 12,
       cloud_fallback: $("setSttCloudFallback") ? $("setSttCloudFallback").checked : true,
     },
     llm: {
       provider: $("setLlmProvider").value,
       ollama_url: $("setOllamaUrl").value.trim() || "http://localhost:11434",
       ollama_model: $("setOllamaModel").value,
-      openrouter_key: $("setKeyOpenrouter") ? $("setKeyOpenrouter").value.trim() : "",
+      openrouter_key: llmOrKeys[0] || "",
+      openrouter_keys: llmOrKeys,
       openrouter_model: $("setModelOpenrouter") ? ($("setModelOpenrouter").value.trim() || "openai/gpt-4o-mini") : "openai/gpt-4o-mini",
-      anthropic_key: $("setKeyAnthropic").value.trim(),
-      openai_key: $("setKeyOpenai").value.trim(),
-      groq_key: $("setKeyGroq").value.trim(),
+      anthropic_key: llmAnthKeys[0] || "",
+      anthropic_keys: llmAnthKeys,
+      openai_key: llmOpenaiKeys[0] || "",
+      openai_keys: llmOpenaiKeys,
+      groq_key: llmGroqKeys[0] || "",
+      groq_keys: llmGroqKeys,
       anthropic_model: $("setModelAnthropic").value.trim(),
       openai_model: $("setModelOpenai").value.trim(),
       groq_model: $("setModelGroq").value.trim(),
@@ -885,26 +966,32 @@ function wireEvents() {
   $("btnRefreshDevices").addEventListener("click", openSettings);
   $("setSttEngine")?.addEventListener("change", syncSttUi);
   $("setSttOpenrouterModel")?.addEventListener("change", syncSttUi);
-  $("btnToggleOrKey")?.addEventListener("click", () => {
-    const inp = $("setSttOpenrouterKey");
-    if (inp) inp.type = inp.type === "password" ? "text" : "password";
-  });
+  $("btnAddSttOrKey")?.addEventListener("click", () => addKeyRow("keysSttOpenrouter", "sk-or-v1-…"));
+  $("btnAddSttOpenaiKey")?.addEventListener("click", () => addKeyRow("keysSttOpenai", "sk-…"));
+  $("btnAddSttGroqKey")?.addEventListener("click", () => addKeyRow("keysSttGroq", "gsk_…"));
+  $("btnAddLlmOrKey")?.addEventListener("click", () => addKeyRow("keysLlmOpenrouter", "sk-or-v1-…"));
+  $("btnAddLlmAnthropicKey")?.addEventListener("click", () => addKeyRow("keysLlmAnthropic", "sk-ant-…"));
+  $("btnAddLlmOpenaiKey")?.addEventListener("click", () => addKeyRow("keysLlmOpenai", "sk-…"));
+  $("btnAddLlmGroqKey")?.addEventListener("click", () => addKeyRow("keysLlmGroq", "gsk_…"));
   $("btnTestOrKey")?.addEventListener("click", async () => {
     if (!isApiReady()) { toast("Aguarde a conexão com o backend...", 3000); return; }
     const st = $("orKeyTestStatus");
-    const rawKey = $("setSttOpenrouterKey")?.value || "";
-    if (st) st.innerHTML = 'Validando chave no OpenRouter... <span class="spin"></span>';
+    const rawKeys = readKeyList("keysSttOpenrouter");
+    if (st) st.innerHTML = 'Validando chave(s) no OpenRouter... <span class="spin"></span>';
     try {
-      const res = await api().test_openrouter_key(rawKey);
-      if (res.ok) {
-        let info = "✅ Chave OpenRouter válida!";
-        if (res.limit_remaining !== null && res.limit_remaining !== undefined) {
-          info += ` Limite restante: $${Number(res.limit_remaining).toFixed(4)}`;
-        } else {
-          info += ` Uso acumulado: $${Number(res.usage || 0).toFixed(4)}`;
-        }
-        if (st) st.innerHTML = `<span style="color:#16a34a; font-weight:600;">${escapeHtml(info)}</span>`;
-        toast(info, 4000);
+      const res = await api().test_openrouter_key(rawKeys);
+      if (res.results && res.results.length) {
+        const parts = res.results.map(r => {
+          if (r.ok) {
+            const bal = (r.limit_remaining !== null && r.limit_remaining !== undefined)
+              ? `$${Number(r.limit_remaining).toFixed(4)} rest.`
+              : `uso $${Number(r.usage || 0).toFixed(4)}`;
+            return `<span style="color:#16a34a;">#${r.index} ✅ (${escapeHtml(bal)})</span>`;
+          }
+          return `<span style="color:#dc2626;">#${r.index} ❌ (${escapeHtml(r.error || "inválida")})</span>`;
+        });
+        if (st) st.innerHTML = `<strong>Resultado:</strong> ${parts.join(" &nbsp;·&nbsp; ")}`;
+        toast(res.ok ? "Chave(s) OpenRouter validadas!" : ("OpenRouter: " + (res.error || "falha")), 4000);
       } else {
         const errMsg = res.error || "Falha ao validar chave.";
         if (st) st.innerHTML = `<span style="color:#dc2626; font-weight:600;">❌ ${escapeHtml(errMsg)}</span>`;

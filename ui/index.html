@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>Muesli v1.4.0</title>
+<title>Muesli v1.4.1</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -20,7 +20,7 @@
         <path d="M13.5 7.5 c0 -1.2 1 -1.2 1 -2.4"/>
       </svg>
       <span class="name">Muesli</span>
-      <span style="font-size:10px; font-weight:700; color:#1e40af; background:#dbeafe; border-radius:4px; padding:1px 5px; margin-left:6px;">v1.4.0</span>
+      <span style="font-size:10px; font-weight:700; color:#1e40af; background:#dbeafe; border-radius:4px; padding:1px 5px; margin-left:6px;">v1.4.1</span>
     </div>
 
     <button class="btn-new" id="btnNew"><span class="dot"></span><span id="btnNewLabel">Nova reunião</span></button>
@@ -119,6 +119,7 @@
             <span class="spacer"></span>
             <button class="tool" id="btnCollapseTr" title="Recolher">&#x276F;</button>
           </div>
+          <div id="trBatchBar" style="display:none; padding:6px 14px; background:var(--panel-soft); border-bottom:1px solid var(--border); font-size:11.5px; color:var(--muted);"></div>
           <div class="transcript-body" id="transcriptBody">
             <div class="tr-status" id="trStatus"></div>
           </div>
@@ -248,13 +249,13 @@
 
         <div id="sttOpenrouterBox" style="display:none; background:var(--panel-soft); border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:14px;">
           <div class="field">
-            <label>Chave de API do OpenRouter (Whisper / STT)</label>
-            <div style="display:flex; gap:8px; align-items:center;">
-              <input type="password" id="setSttOpenrouterKey" placeholder="sk-or-v1-…" autocomplete="off" style="flex:1;">
-              <button type="button" class="btn-plain" id="btnToggleOrKey" title="Mostrar ou ocultar chave" style="padding:8px 10px;">👁</button>
-              <button type="button" class="btn-plain" id="btnTestOrKey" style="font-weight:600;">Testar chave</button>
+            <label>Chaves de API do OpenRouter (Whisper / STT — rotação automática)</label>
+            <div class="key-list" id="keysSttOpenrouter"></div>
+            <div class="key-actions">
+              <button type="button" class="btn-mini" id="btnAddSttOrKey">+ Adicionar outra chave</button>
+              <button type="button" class="btn-plain" id="btnTestOrKey" style="padding:4px 12px; font-size:12px; font-weight:600;">Testar chaves</button>
             </div>
-            <div class="hint" id="orKeyTestStatus">Crie ou copie sua chave em <code>openrouter.ai/settings/keys</code>. Transcreve na nuvem sem consumir CPU/GPU local.</div>
+            <div class="hint" id="orKeyTestStatus">Adicione uma ou mais chaves de <code>openrouter.ai/settings/keys</code>. Se uma atingir limite ou falhar, o Muesli alterna automaticamente para a próxima.</div>
           </div>
           <div class="field" style="margin-bottom:8px;">
             <label>Modelo Whisper / STT no OpenRouter</label>
@@ -281,42 +282,56 @@
         </div>
 
         <div id="sttOpenaiBox" style="display:none; background:var(--panel-soft); border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:14px;">
-          <div class="two-col">
-            <div class="field" style="margin-bottom:0;">
-              <label>Chave de API OpenAI (Whisper)</label>
-              <input type="password" id="setSttOpenaiKey" placeholder="sk-… (ou usa a chave de Modelos de IA)" autocomplete="off">
+          <div class="field">
+            <label>Chaves de API OpenAI (Whisper — rotação automática)</label>
+            <div class="key-list" id="keysSttOpenai"></div>
+            <div class="key-actions">
+              <button type="button" class="btn-mini" id="btnAddSttOpenaiKey">+ Adicionar outra chave</button>
             </div>
-            <div class="field" style="margin-bottom:0;">
-              <label>Modelo OpenAI STT</label>
-              <select id="setSttOpenaiModel">
-                <option value="whisper-1">whisper-1 (padrão)</option>
-                <option value="gpt-4o-transcribe">gpt-4o-transcribe</option>
-                <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe</option>
-              </select>
-            </div>
+            <div class="hint">Deixe vazio para usar as chaves OpenAI da aba <b>Modelos de IA</b>. Adicione múltiplas chaves para alternar em caso de limite (429).</div>
+          </div>
+          <div class="field" style="margin-bottom:0;">
+            <label>Modelo OpenAI STT</label>
+            <select id="setSttOpenaiModel">
+              <option value="whisper-1">whisper-1 (padrão)</option>
+              <option value="gpt-4o-transcribe">gpt-4o-transcribe</option>
+              <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe</option>
+            </select>
           </div>
         </div>
 
         <div id="sttGroqBox" style="display:none; background:var(--panel-soft); border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:14px;">
-          <div class="two-col">
-            <div class="field" style="margin-bottom:0;">
-              <label>Chave de API Groq (Whisper)</label>
-              <input type="password" id="setSttGroqKey" placeholder="gsk_… (ou usa a chave de Modelos de IA)" autocomplete="off">
+          <div class="field">
+            <label>Chaves de API Groq (Whisper — rotação automática)</label>
+            <div class="key-list" id="keysSttGroq"></div>
+            <div class="key-actions">
+              <button type="button" class="btn-mini" id="btnAddSttGroqKey">+ Adicionar outra chave</button>
             </div>
-            <div class="field" style="margin-bottom:0;">
-              <label>Modelo Groq Whisper</label>
-              <select id="setSttGroqModel">
-                <option value="whisper-large-v3-turbo">whisper-large-v3-turbo (recomendado)</option>
-                <option value="whisper-large-v3">whisper-large-v3</option>
-              </select>
-            </div>
+            <div class="hint">Adicione duas ou mais chaves <code>gsk_…</code> para dobrar limites de RPM/RPD automaticamente. Se vazio, usa as chaves Groq de <b>Modelos de IA</b>.</div>
+          </div>
+          <div class="field" style="margin-bottom:0;">
+            <label>Modelo Groq Whisper</label>
+            <select id="setSttGroqModel">
+              <option value="whisper-large-v3-turbo">whisper-large-v3-turbo (recomendado)</option>
+              <option value="whisper-large-v3">whisper-large-v3</option>
+            </select>
           </div>
         </div>
 
         <div id="sttCloudFallbackWrap" style="display:none;">
+          <div class="field">
+            <label>Modo de Envio na Nuvem (Frequência das Requisições)</label>
+            <select id="setSttCloudInterval">
+              <option value="12">Tempo real (padrão — a cada pausa ou até 12s)</option>
+              <option value="60">Econômico 1 min (1 req/min — ótima economia com transcrição quase ao vivo)</option>
+              <option value="300">Lote 5 min (envia a cada 5 min — ~9,5 MB por envio)</option>
+              <option value="480">Lote 8 min (máxima economia de requisições — ~14,6 MB por envio, dentro do limite de 25 MB)</option>
+            </select>
+            <div class="hint">Em modo lote (1, 5 ou 8 min), o áudio fica salvo na memória e é enviado periodicamente (ou imediatamente ao clicar em <b>Parar</b>). Silêncios completos são ignorados sem gastar API.</div>
+          </div>
           <div class="check-row">
             <input type="checkbox" id="setSttCloudFallback">
-            <label for="setSttCloudFallback">Se a API na nuvem falhar ou ficar sem internet, alternar para o Whisper local automaticamente (não perde a reunião)</label>
+            <label for="setSttCloudFallback">Se todas as chaves na nuvem falharem ou ficar sem internet, alternar para o Whisper local automaticamente (não perde a reunião)</label>
           </div>
         </div>
       </div>
@@ -345,41 +360,64 @@
             <input type="text" id="setOllamaUrl" placeholder="http://localhost:11434">
           </div>
         </div>
-        <div class="two-col">
-          <div class="field">
-            <label>Chave de API OpenRouter (opcional)</label>
-            <input type="password" id="setKeyOpenrouter" placeholder="sk-or-v1-…" autocomplete="off">
-          </div>
-          <div class="field">
-            <label>Modelo OpenRouter (Resumo/Chat)</label>
-            <input type="text" id="setModelOpenrouter" placeholder="openai/gpt-4o-mini">
-          </div>
-          <div class="field">
-            <label>Chave de API Anthropic (opcional)</label>
-            <input type="password" id="setKeyAnthropic" placeholder="sk-ant-…" autocomplete="off">
-          </div>
-          <div class="field">
-            <label>Modelo Anthropic</label>
-            <input type="text" id="setModelAnthropic">
-          </div>
-          <div class="field">
-            <label>Chave de API OpenAI (opcional)</label>
-            <input type="password" id="setKeyOpenai" placeholder="sk-…" autocomplete="off">
-          </div>
-          <div class="field">
-            <label>Modelo OpenAI</label>
-            <input type="text" id="setModelOpenai">
-          </div>
-          <div class="field">
-            <label>Chave de API Groq (opcional)</label>
-            <input type="password" id="setKeyGroq" placeholder="gsk_…" autocomplete="off">
-          </div>
-          <div class="field">
-            <label>Modelo Groq</label>
-            <input type="text" id="setModelGroq">
+
+        <div class="ai-prov-card">
+          <div class="two-col" style="align-items:start;">
+            <div class="field" style="margin-bottom:0;">
+              <label>Chaves de API OpenRouter</label>
+              <div class="key-list" id="keysLlmOpenrouter"></div>
+              <div class="key-actions"><button type="button" class="btn-mini" id="btnAddLlmOrKey">+ Adicionar chave</button></div>
+            </div>
+            <div class="field" style="margin-bottom:0;">
+              <label>Modelo OpenRouter (Resumo/Chat)</label>
+              <input type="text" id="setModelOpenrouter" placeholder="openai/gpt-4o-mini">
+            </div>
           </div>
         </div>
-        <div class="hint">As chaves de API ficam salvas apenas no seu computador e são usadas exclusivamente para chamar o provedor configurado. Deixe tudo em branco para usar o Muesli totalmente offline e gratuito.</div>
+
+        <div class="ai-prov-card">
+          <div class="two-col" style="align-items:start;">
+            <div class="field" style="margin-bottom:0;">
+              <label>Chaves de API Anthropic</label>
+              <div class="key-list" id="keysLlmAnthropic"></div>
+              <div class="key-actions"><button type="button" class="btn-mini" id="btnAddLlmAnthropicKey">+ Adicionar chave</button></div>
+            </div>
+            <div class="field" style="margin-bottom:0;">
+              <label>Modelo Anthropic</label>
+              <input type="text" id="setModelAnthropic">
+            </div>
+          </div>
+        </div>
+
+        <div class="ai-prov-card">
+          <div class="two-col" style="align-items:start;">
+            <div class="field" style="margin-bottom:0;">
+              <label>Chaves de API OpenAI</label>
+              <div class="key-list" id="keysLlmOpenai"></div>
+              <div class="key-actions"><button type="button" class="btn-mini" id="btnAddLlmOpenaiKey">+ Adicionar chave</button></div>
+            </div>
+            <div class="field" style="margin-bottom:0;">
+              <label>Modelo OpenAI</label>
+              <input type="text" id="setModelOpenai">
+            </div>
+          </div>
+        </div>
+
+        <div class="ai-prov-card">
+          <div class="two-col" style="align-items:start;">
+            <div class="field" style="margin-bottom:0;">
+              <label>Chaves de API Groq</label>
+              <div class="key-list" id="keysLlmGroq"></div>
+              <div class="key-actions"><button type="button" class="btn-mini" id="btnAddLlmGroqKey">+ Adicionar chave</button></div>
+            </div>
+            <div class="field" style="margin-bottom:0;">
+              <label>Modelo Groq</label>
+              <input type="text" id="setModelGroq">
+            </div>
+          </div>
+        </div>
+
+        <div class="hint">Todas as chaves ficam salvas apenas no seu computador. Se você adicionar múltiplas chaves em um provedor, o Muesli faz rotação e fallback automático se uma delas atingir o limite (429) ou falhar.</div>
       </div>
 
       <div class="set-section" data-set="templates">
@@ -404,7 +442,7 @@
         <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
           <div>
             <div style="font-size:14px; font-weight:700; color:var(--ink);">Muesli para Windows</div>
-            <div style="font-size:12.5px; color:var(--muted);" id="updateCurrentVer">Versão instalada: v1.4.0</div>
+            <div style="font-size:12.5px; color:var(--muted);" id="updateCurrentVer">Versão instalada: v1.4.1</div>
           </div>
           <span style="flex:1"></span>
           <button class="btn-plain" id="btnCheckUpdatesNow" style="padding:8px 16px; font-weight:600;">

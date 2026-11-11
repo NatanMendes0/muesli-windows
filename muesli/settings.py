@@ -32,11 +32,15 @@ DEFAULTS = {
         "language": "pt",           # pt | en | auto
         "compute_type": "int8",
         "openrouter_key": "",
+        "openrouter_keys": [],
         "openrouter_model": "openai/whisper-large-v3-turbo",
         "openai_key": "",
+        "openai_keys": [],
         "openai_model": "whisper-1",
         "groq_key": "",
+        "groq_keys": [],
         "groq_model": "whisper-large-v3-turbo",
+        "cloud_interval_sec": 12,   # 12 (realtime) | 60 (1m) | 300 (5m) | 480 (8m)
         "cloud_fallback": True,
     },
     "llm": {
@@ -44,13 +48,17 @@ DEFAULTS = {
         "ollama_url": "http://localhost:11434",
         "ollama_model": "",         # empty = first installed model
         "openrouter_key": "",
+        "openrouter_keys": [],
         "openrouter_model": "openai/gpt-4o-mini",
         "openai_key": "",
+        "openai_keys": [],
         "openai_url": "",           # custom base URL or empty for api.openai.com
         "openai_model": "gpt-4o-mini",
         "groq_key": "",
+        "groq_keys": [],
         "groq_model": "llama-3.3-70b-versatile",
         "anthropic_key": "",
+        "anthropic_keys": [],
         "anthropic_model": "claude-haiku-4-5-20251001",
     },
     "audio": {

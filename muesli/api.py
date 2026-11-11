@@ -15,7 +15,7 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-from . import audio, chatlogic, db, enhance, fonts, session, settings, stt, templates
+from . import audio, chatlogic, db, enhance, fonts, keypool, session, settings, stt, templates
 from . import APP_VERSION
 
 
@@ -348,25 +348,44 @@ tags: [reuniao/executiva]
     def get_settings(self):
         s = settings.load()
         # Never leak more than a hint of stored keys back to the UI.
-        red_llm = {k: ("*" * 8 + v[-4:] if v else "")
-                   for k, v in s["llm"].items() if k.endswith("_key")}
-        red_stt = {k: ("*" * 8 + v[-4:] if v else "")
-                   for k, v in s["stt"].items() if k.endswith("_key")}
-        out = {
-            **s,
-            "llm": {**s["llm"], **red_llm},
-            "stt": {**s["stt"], **red_stt},
-        }
+        llm_out = dict(s["llm"])
+        stt_out = dict(s["stt"])
+        for field_base in ("openrouter", "openai", "groq", "anthropic"):
+            sing, plur = f"{field_base}_key", f"{field_base}_keys"
+            if sing in llm_out or plur in llm_out:
+                keys = keypool.collect_keys(llm_out, sing, plur)
+                llm_out[sing] = keypool.mask_key(keys[0]) if keys else ""
+                llm_out[plur] = keypool.mask_keys(keys)
+            if sing in stt_out or plur in stt_out:
+                keys = keypool.collect_keys(stt_out, sing, plur)
+                stt_out[sing] = keypool.mask_key(keys[0]) if keys else ""
+                stt_out[plur] = keypool.mask_keys(keys)
+        out = {**s, "llm": llm_out, "stt": stt_out}
         out["launch_at_startup"] = settings.get_launch_at_startup()
         return out
 
     def save_settings(self, patch):
         patch = patch or {}
-        for section in ("llm", "stt"):
-            sub = patch.get(section) or {}
-            for k in list(sub.keys()):
-                if k.endswith("_key") and isinstance(sub[k], str) and sub[k].startswith("********"):
-                    sub.pop(k)  # unchanged masked value
+        cur = settings.load()
+        for section, providers in (
+            ("llm", ("openrouter", "openai", "groq", "anthropic")),
+            ("stt", ("openrouter", "openai", "groq")),
+        ):
+            sub = patch.get(section)
+            if not isinstance(sub, dict):
+                continue
+            for p in providers:
+                sing, plur = f"{p}_key", f"{p}_keys"
+                if sing not in sub and plur not in sub:
+                    continue
+                old_keys = keypool.collect_keys(cur.get(section, {}), sing, plur)
+                prim, full_list = keypool.resolve_incoming_keys(
+                    old_keys,
+                    incoming_list=sub.get(plur) if plur in sub else None,
+                    incoming_single=sub.get(sing) if sing in sub else None,
+                )
+                sub[sing] = prim
+                sub[plur] = full_list
         warning = ""
         if "launch_at_startup" in patch:
             try:
@@ -375,37 +394,65 @@ tags: [reuniao/executiva]
                 patch.pop("launch_at_startup", None)
                 warning = f"Could not change launch at startup: {e}"
         settings.save(patch)
+        keypool.rotator.clear()
         stt.reset_status()
         return {"ok": True, "warning": warning}
 
-    def test_openrouter_key(self, raw_key=""):
-        key = (raw_key or "").strip()
-        if not key or key.startswith("********"):
-            s = settings.load()
-            key = (s["stt"].get("openrouter_key") or s["llm"].get("openrouter_key") or "").strip()
-        if not key:
-            return {"ok": False, "error": "Informe uma chave de API do OpenRouter primeiro."}
-        try:
-            url = "https://openrouter.ai/api/v1/key"
-            headers = {"Authorization": f"Bearer {key}"}
+    def test_openrouter_key(self, raw_keys=""):
+        s = settings.load()
+        saved_keys = keypool.collect_keys(s["stt"], "openrouter_key", "openrouter_keys")
+        if not saved_keys:
+            saved_keys = keypool.collect_keys(s["llm"], "openrouter_key", "openrouter_keys")
+
+        if isinstance(raw_keys, list):
+            _, keys = keypool.resolve_incoming_keys(saved_keys, incoming_list=raw_keys)
+        else:
+            raw = (raw_keys or "").strip()
+            if not raw or raw.startswith("********"):
+                keys = saved_keys
+            else:
+                keys = [raw]
+
+        if not keys:
+            return {"ok": False, "error": "Informe ao menos uma chave de API do OpenRouter primeiro."}
+
+        results = []
+        any_ok = False
+        for idx, key in enumerate(keys, start=1):
             try:
-                r = requests.get(url, headers=headers, timeout=10)
-            except requests.exceptions.SSLError:
-                r = requests.get(url, headers=headers, timeout=10, verify=False)
-            if r.status_code != 200:
-                msg = stt._extract_api_error(r)
-                return {"ok": False, "error": f"HTTP {r.status_code}: {msg}"}
-            d = r.json().get("data") or {}
-            return {
-                "ok": True,
-                "label": d.get("label", ""),
-                "limit": d.get("limit"),
-                "limit_remaining": d.get("limit_remaining"),
-                "usage": d.get("usage", 0),
-                "is_free_tier": d.get("is_free_tier", False),
-            }
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
+                url = "https://openrouter.ai/api/v1/key"
+                headers = {"Authorization": f"Bearer {key}"}
+                try:
+                    r = requests.get(url, headers=headers, timeout=10)
+                except requests.exceptions.SSLError:
+                    r = requests.get(url, headers=headers, timeout=10, verify=False)
+                if r.status_code != 200:
+                    msg = stt._extract_api_error(r)
+                    results.append({"index": idx, "ok": False, "error": f"HTTP {r.status_code}: {msg}"})
+                    continue
+                d = r.json().get("data") or {}
+                any_ok = True
+                results.append({
+                    "index": idx,
+                    "ok": True,
+                    "label": d.get("label", ""),
+                    "limit": d.get("limit"),
+                    "limit_remaining": d.get("limit_remaining"),
+                    "usage": d.get("usage", 0),
+                    "is_free_tier": d.get("is_free_tier", False),
+                })
+            except Exception as e:
+                results.append({"index": idx, "ok": False, "error": str(e)})
+
+        first_ok = next((x for x in results if x["ok"]), None)
+        return {
+            "ok": any_ok,
+            "count": len(results),
+            "results": results,
+            "limit_remaining": first_ok.get("limit_remaining") if first_ok else None,
+            "usage": first_ok.get("usage", 0) if first_ok else 0,
+            "error": "" if any_ok else (results[0].get("error") if results else "Falha"),
+        }
 
     def list_openrouter_stt_models(self):
         try:

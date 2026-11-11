@@ -10,7 +10,7 @@ from collections import Counter
 
 import requests
 
-from . import settings
+from . import keypool, settings
 
 REQUEST_TIMEOUT = 240
 OLLAMA_TIMEOUT = 900          # local models on CPU can be slow; do not give up on them
@@ -122,25 +122,52 @@ def llm_available() -> dict:
     return value
 
 
+def _call_with_rotation(pool_name: str, keys: list, fn):
+    ordered = keypool.rotator.ordered_keys(pool_name, keys)
+    last_exc = None
+    for key in ordered:
+        try:
+            res = fn(key)
+            keypool.rotator.mark_success(pool_name, key, keys)
+            return res
+        except requests.HTTPError as e:
+            resp = getattr(e, "response", None)
+            code = resp.status_code if resp is not None else 0
+            retry_after = 0.0
+            if resp is not None:
+                try:
+                    retry_after = float((resp.headers.get("retry-after") or "").strip() or 0)
+                except ValueError:
+                    retry_after = 0.0
+            keypool.rotator.mark_failure(pool_name, key, code, retry_after)
+            last_exc = e
+        except requests.RequestException as e:
+            keypool.rotator.mark_failure(pool_name, key, 0)
+            last_exc = e
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError(f"Nenhuma chave configurada para {pool_name}")
+
+
 def _llm_available_uncached(cfg: dict) -> dict:
     provider = cfg.get("provider", "auto")
     out = {"provider": "", "detail": ""}
     order = _provider_order(cfg, provider)
     for name in order:
-        if name == "anthropic" and cfg.get("anthropic_key"):
+        if name == "anthropic" and keypool.collect_keys(cfg, "anthropic_key", "anthropic_keys"):
             out.update(provider="anthropic", detail=cfg.get("anthropic_model", ""))
             return out
         if name == "openrouter":
-            or_key = cfg.get("openrouter_key") or (
-                settings.load()["stt"].get("openrouter_key") if provider == "openrouter" else ""
-            )
-            if or_key:
+            keys = keypool.collect_keys(cfg, "openrouter_key", "openrouter_keys")
+            if not keys and provider == "openrouter":
+                keys = keypool.collect_keys(settings.load()["stt"], "openrouter_key", "openrouter_keys")
+            if keys:
                 out.update(provider="openrouter", detail=cfg.get("openrouter_model") or "openai/gpt-4o-mini")
                 return out
-        if name == "openai" and (cfg.get("openai_key") or cfg.get("openai_url")):
+        if name == "openai" and (keypool.collect_keys(cfg, "openai_key", "openai_keys") or cfg.get("openai_url")):
             out.update(provider="openai", detail=cfg.get("openai_model", ""))
             return out
-        if name == "groq" and cfg.get("groq_key"):
+        if name == "groq" and keypool.collect_keys(cfg, "groq_key", "groq_keys"):
             out.update(provider="groq", detail=cfg.get("groq_model", ""))
             return out
         if name == "ollama":
@@ -166,35 +193,47 @@ def llm_complete(system: str, user: str):
     errors = []
     for name in _provider_order(cfg, cfg.get("provider", "auto")):
         try:
-            if name == "anthropic" and cfg.get("anthropic_key"):
-                return _call_anthropic(system, user, cfg["anthropic_key"],
-                                       cfg.get("anthropic_model") or "claude-haiku-4-5-20251001"), "anthropic"
+            if name == "anthropic":
+                keys = keypool.collect_keys(cfg, "anthropic_key", "anthropic_keys")
+                if keys:
+                    model = cfg.get("anthropic_model") or "claude-haiku-4-5-20251001"
+                    return _call_with_rotation("llm:anthropic", keys,
+                                               lambda k: _call_anthropic(system, user, k, model)), "anthropic"
             if name == "openrouter":
-                or_key = cfg.get("openrouter_key") or (
-                    settings.load()["stt"].get("openrouter_key")
-                    if cfg.get("provider") == "openrouter" else ""
-                )
-                if or_key:
-                    return _call_openai_style(
-                        system, user,
-                        "https://openrouter.ai/api/v1/chat/completions",
-                        or_key,
-                        cfg.get("openrouter_model") or "openai/gpt-4o-mini",
-                        extra_headers={
-                            "HTTP-Referer": "https://github.com/NatanMendes0/muesli-windows",
-                            "X-Title": "Muesli",
-                        }), "openrouter"
-            if name == "openai" and (cfg.get("openai_key") or cfg.get("openai_url")):
-                url = cfg.get("openai_url") or "https://api.openai.com/v1/chat/completions"
-                return _call_openai_style(system, user,
-                                          url,
-                                          cfg.get("openai_key") or "dummy-key",
-                                          cfg.get("openai_model") or "gpt-4o-mini"), "openai"
-            if name == "groq" and cfg.get("groq_key"):
-                return _call_openai_style(system, user,
-                                          "https://api.groq.com/openai/v1/chat/completions",
-                                          cfg["groq_key"],
-                                          cfg.get("groq_model") or "llama-3.3-70b-versatile"), "groq"
+                keys = keypool.collect_keys(cfg, "openrouter_key", "openrouter_keys")
+                if not keys and cfg.get("provider") == "openrouter":
+                    keys = keypool.collect_keys(settings.load()["stt"], "openrouter_key", "openrouter_keys")
+                if keys:
+                    model = cfg.get("openrouter_model") or "openai/gpt-4o-mini"
+                    return _call_with_rotation(
+                        "llm:openrouter", keys,
+                        lambda k: _call_openai_style(
+                            system, user,
+                            "https://openrouter.ai/api/v1/chat/completions",
+                            k, model,
+                            extra_headers={
+                                "HTTP-Referer": "https://github.com/NatanMendes0/muesli-windows",
+                                "X-Title": "Muesli",
+                            },
+                        )), "openrouter"
+            if name == "openai":
+                keys = keypool.collect_keys(cfg, "openai_key", "openai_keys")
+                if keys or cfg.get("openai_url"):
+                    url = cfg.get("openai_url") or "https://api.openai.com/v1/chat/completions"
+                    model = cfg.get("openai_model") or "gpt-4o-mini"
+                    return _call_with_rotation(
+                        "llm:openai", keys or ["dummy-key"],
+                        lambda k: _call_openai_style(system, user, url, k, model)), "openai"
+            if name == "groq":
+                keys = keypool.collect_keys(cfg, "groq_key", "groq_keys")
+                if keys:
+                    model = cfg.get("groq_model") or "llama-3.3-70b-versatile"
+                    return _call_with_rotation(
+                        "llm:groq", keys,
+                        lambda k: _call_openai_style(
+                            system, user,
+                            "https://api.groq.com/openai/v1/chat/completions",
+                            k, model)), "groq"
             if name == "ollama":
                 return _call_ollama(system, user, cfg), "ollama"
         except Exception as e:
