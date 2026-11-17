@@ -25,7 +25,12 @@ CREATE TABLE IF NOT EXISTS meetings (
     summary_md TEXT DEFAULT '',
     summary_provider TEXT DEFAULT '',
     attendees TEXT DEFAULT '',
-    audio_path TEXT DEFAULT ''
+    audio_path TEXT DEFAULT '',
+    category_id INTEGER
+);
+CREATE TABLE IF NOT EXISTS meeting_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL COLLATE NOCASE UNIQUE
 );
 CREATE TABLE IF NOT EXISTS segments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,6 +87,8 @@ def init():
     if "title_manual" not in cols:
         c.execute("ALTER TABLE meetings ADD COLUMN title_manual INTEGER DEFAULT 0")
         c.execute("UPDATE meetings SET title_manual=1 WHERE title != 'Untitled meeting' AND title != ''")
+    if "category_id" not in cols:
+        c.execute("ALTER TABLE meetings ADD COLUMN category_id INTEGER")
     try:
         c.executescript(FTS_SCHEMA)
         _fts_available = True
@@ -97,13 +104,16 @@ def fts_available() -> bool:
 
 # Meetings
 
-def create_meeting(title: str, template_id: str) -> int:
+def create_meeting(title: str, template_id: str, category_id=None) -> int:
     c = conn()
     clean = (title or "").strip() or "Untitled meeting"
     manual = 1 if clean != "Untitled meeting" else 0
+    if category_id is not None and not c.execute(
+            "SELECT 1 FROM meeting_categories WHERE id=?", (category_id,)).fetchone():
+        category_id = None
     cur = c.execute(
-        "INSERT INTO meetings (title, title_manual, created_at, template_id) VALUES (?, ?, ?, ?)",
-        (clean, manual, time.time(), template_id or "auto"))
+        "INSERT INTO meetings (title, title_manual, created_at, template_id, category_id) VALUES (?, ?, ?, ?, ?)",
+        (clean, manual, time.time(), template_id or "auto", category_id))
     c.commit()
     return cur.lastrowid
 
@@ -114,7 +124,7 @@ def end_meeting(meeting_id: int, duration_sec: float, audio_path: str = ""):
     c.commit()
 
 def update_meeting(meeting_id: int, **fields):
-    allowed = {"title", "title_manual", "notes_md", "summary_md", "summary_provider", "template_id", "attendees"}
+    allowed = {"title", "title_manual", "notes_md", "summary_md", "summary_provider", "template_id", "attendees", "category_id"}
     sets, vals = [], []
     for k, v in fields.items():
         if k in allowed:
@@ -160,7 +170,7 @@ def list_meetings(search: str = "", limit: int = 500):
                     pass
         like = _like(search.strip())
         rows = c.execute(
-            "SELECT id, title, created_at, ended_at, duration_sec, template_id, "
+            "SELECT id, title, created_at, ended_at, duration_sec, template_id, category_id, "
             "substr(summary_md, 1, 200) AS preview FROM meetings "
             "WHERE title LIKE ? ESCAPE '\\' OR notes_md LIKE ? ESCAPE '\\' "
             "OR summary_md LIKE ? ESCAPE '\\' OR id IN ({}) "
@@ -169,10 +179,46 @@ def list_meetings(search: str = "", limit: int = 500):
             (like, like, like, limit)).fetchall()
     else:
         rows = c.execute(
-            "SELECT id, title, created_at, ended_at, duration_sec, template_id, "
+            "SELECT id, title, created_at, ended_at, duration_sec, template_id, category_id, "
             "substr(summary_md, 1, 200) AS preview FROM meetings "
             "ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
     return [dict(r) for r in rows]
+
+# Categories
+
+def list_categories():
+    rows = conn().execute("SELECT id, name FROM meeting_categories ORDER BY name COLLATE NOCASE").fetchall()
+    return [dict(row) for row in rows]
+
+def create_category(name: str):
+    clean = (name or "").strip()
+    if not clean:
+        return None
+    c = conn()
+    try:
+        cur = c.execute("INSERT INTO meeting_categories (name) VALUES (?)", (clean,))
+        c.commit()
+        return cur.lastrowid
+    except sqlite3.IntegrityError:
+        return None
+
+def rename_category(category_id: int, name: str) -> bool:
+    clean = (name or "").strip()
+    if not clean:
+        return False
+    c = conn()
+    try:
+        cur = c.execute("UPDATE meeting_categories SET name=? WHERE id=?", (clean, category_id))
+        c.commit()
+        return cur.rowcount > 0
+    except sqlite3.IntegrityError:
+        return False
+
+def delete_category(category_id: int):
+    c = conn()
+    c.execute("UPDATE meetings SET category_id=NULL WHERE category_id=?", (category_id,))
+    c.execute("DELETE FROM meeting_categories WHERE id=?", (category_id,))
+    c.commit()
 
 # Segments
 

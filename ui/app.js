@@ -5,6 +5,7 @@ const $ = (id) => document.getElementById(id);
 
 const state = {
   meetings: [],
+  categories: [],
   current: null,        // full meeting object currently open
   recording: false,
   activeMeetingId: null,
@@ -110,34 +111,102 @@ function fmtDur(sec) {
 async function refreshMeetings() {
   const q = $("searchInput").value.trim();
   const seq = ++state.searchSeq;
-  const meetings = await api().list_meetings(q);
+  const [meetings, categories] = await Promise.all([
+    api().list_meetings(q), api().list_categories(),
+  ]);
   if (seq !== state.searchSeq) return; // a newer search finished first
   state.meetings = meetings;
+  state.categories = categories;
+  const categorySelect = $("meetingCategory");
+  if (categorySelect) {
+    categorySelect.innerHTML = '<option value="">Sem categoria</option>';
+    for (const category of categories) {
+      const option = document.createElement("option");
+      option.value = category.id;
+      option.textContent = category.name;
+      categorySelect.appendChild(option);
+    }
+    categorySelect.value = state.current && state.current.category_id != null
+      ? String(state.current.category_id) : "";
+  }
   const list = $("meetingList");
   list.innerHTML = "";
   if (!state.meetings.length) {
     list.innerHTML = `<div class="list-empty">${q ? "No matches." : "No meetings yet.<br>Hit New note to start one."}</div>`;
-    return;
   }
-  let lastGroup = "";
-  for (const m of state.meetings) {
-    const g = dateGroup(m.created_at);
-    if (g !== lastGroup) {
-      lastGroup = g;
-      const gd = document.createElement("div");
-      gd.className = "date-group";
-      gd.textContent = g;
-      list.appendChild(gd);
+  let collapsed = new Set();
+  try { collapsed = new Set(JSON.parse(localStorage.getItem("muesli_collapsed_categories") || "[]")); } catch (e) {}
+  const sections = [{ id: "uncategorized", name: "Sem categoria", categoryId: null },
+    ...categories.map(c => ({ id: String(c.id), name: c.name, categoryId: c.id }))];
+  for (const sectionData of sections) {
+    const items = state.meetings.filter(m => (m.category_id ?? null) === sectionData.categoryId);
+    if (items.length === 0 && sectionData.id !== "uncategorized" && q) continue;
+    const section = document.createElement("section");
+    section.className = "category-section";
+    const heading = document.createElement("div");
+    heading.className = "category-heading";
+    const toggle = document.createElement("button");
+    toggle.className = "category-toggle";
+    const isCollapsed = collapsed.has(sectionData.id);
+    toggle.innerHTML = `<span class="chevron">${isCollapsed ? "▶" : "▼"}</span>`;
+    toggle.appendChild(document.createTextNode(sectionData.name));
+    toggle.title = isCollapsed ? "Expandir categoria" : "Recolher categoria";
+    toggle.setAttribute("aria-expanded", String(!isCollapsed));
+    toggle.addEventListener("click", () => {
+      const next = new Set();
+      try { JSON.parse(localStorage.getItem("muesli_collapsed_categories") || "[]").forEach(x => next.add(x)); } catch (e) {}
+      if (next.has(sectionData.id)) next.delete(sectionData.id); else next.add(sectionData.id);
+      localStorage.setItem("muesli_collapsed_categories", JSON.stringify([...next]));
+      refreshMeetings();
+    });
+    heading.appendChild(toggle);
+    if (sectionData.categoryId !== null) {
+      const add = document.createElement("button");
+      add.className = "category-action"; add.textContent = "+"; add.title = `Nova reunião em ${sectionData.name}`;
+      add.disabled = state.recording;
+      add.addEventListener("click", () => startNewNote(sectionData.categoryId));
+      heading.appendChild(add);
+      const rename = document.createElement("button");
+      rename.className = "category-action"; rename.textContent = "…"; rename.title = "Renomear categoria";
+      rename.addEventListener("click", async () => {
+        const name = prompt("Nome da categoria:", sectionData.name);
+        if (name === null) return;
+        const result = await api().rename_category(sectionData.categoryId, name);
+        if (!result.ok) return toast(result.error);
+        await refreshMeetings();
+      });
+      heading.appendChild(rename);
+      const remove = document.createElement("button");
+      remove.className = "category-action"; remove.textContent = "×"; remove.title = "Excluir categoria";
+      remove.addEventListener("click", async () => {
+        if (!confirm(`Excluir “${sectionData.name}”? As reuniões serão mantidas sem categoria.`)) return;
+        await api().delete_category(sectionData.categoryId);
+        await refreshMeetings();
+        if (state.current) openMeeting(state.current.id);
+      });
+      heading.appendChild(remove);
     }
-    const btn = document.createElement("button");
-    btn.className = "meeting-item" + (state.current && state.current.id === m.id ? " active" : "");
-    const live = m.id === state.activeMeetingId && state.recording;
-    btn.innerHTML = `<div class="title"></div>
-      <div class="meta">${live ? '<span class="live">● recording</span>' : ""}
-        <span>${fmtDate(m.created_at)}</span><span>${fmtDur(m.duration_sec)}</span></div>`;
-    btn.querySelector(".title").textContent = m.title;
-    btn.addEventListener("click", () => openMeeting(m.id));
-    list.appendChild(btn);
+    section.appendChild(heading);
+    if (!isCollapsed || q) {
+      let lastGroup = "";
+      for (const m of items) {
+        const group = dateGroup(m.created_at);
+        if (group !== lastGroup) {
+          lastGroup = group;
+          const dateHeading = document.createElement("div");
+          dateHeading.className = "date-group"; dateHeading.textContent = group;
+          section.appendChild(dateHeading);
+        }
+        const btn = document.createElement("button");
+        btn.className = "meeting-item" + (state.current && state.current.id === m.id ? " active" : "");
+        const live = m.id === state.activeMeetingId && state.recording;
+        btn.innerHTML = `<div class="title"></div><div class="meta">${live ? '<span class="live">● recording</span>' : ""}<span>${fmtDate(m.created_at)}</span><span>${fmtDur(m.duration_sec)}</span></div>`;
+        btn.querySelector(".title").textContent = m.title;
+        btn.addEventListener("click", () => openMeeting(m.id));
+        section.appendChild(btn);
+      }
+    }
+    list.appendChild(section);
   }
 }
 
@@ -167,6 +236,7 @@ async function openMeeting(id) {
     " " + fmtDate(m.created_at) + (m.duration_sec ? "  ·  " + fmtDur(m.duration_sec) : "");
   $("tplSelect").value = m.template_id || "auto";
   if (!$("tplSelect").value) $("tplSelect").value = "auto";
+  if ($("meetingCategory")) $("meetingCategory").value = m.category_id == null ? "" : String(m.category_id);
 
   renderTranscript(m.segments || []);
   renderEnhanced(m.summary_md, m.summary_provider);
@@ -197,14 +267,43 @@ function setRecordingUi(on) {
   document.body.classList.toggle("is-recording", !!state.recording);
   if (!on && $("trBatchBar")) $("trBatchBar").style.display = "none";
   const cb = $("consentBanner");
-  if (on && state.settings && state.settings.consent && state.settings.consent.enabled) {
-    cb.innerHTML = "Lembrete de consentimento: informe aos participantes que você está utilizando um assistente de transcrição. " +
-      '<span class="copy-link" id="consentCopy">Copiar aviso</span>';
+  if (state.recording) {
+    const s = state.settings || {};
+    const stt = s.stt || {};
+    const keys = stt[`${stt.engine}_keys`] || (stt[`${stt.engine}_key`] ? [stt[`${stt.engine}_key`]] : []);
+    const provider = state.settingsState && state.settingsState.llm && state.settingsState.llm.provider;
+    const details = ["Captura: microfone e áudio do sistema quando disponíveis; sem vídeo."];
+    if (stt.engine === "local" || !stt.engine) {
+      details.push("Transcrição processada localmente; o áudio não é enviado para STT na nuvem.");
+    } else if (keys.length) {
+      details.push(`Transcrição na nuvem via ${stt.engine}: blocos de áudio são enviados a esse provedor.${stt.cloud_fallback !== false ? " Se a API falhar, o Whisper local será usado como reserva." : ""}`);
+    } else if (stt.cloud_fallback !== false) {
+      details.push("Nenhuma chave de STT na nuvem está configurada; o app tentará Whisper local como reserva.");
+    } else {
+      details.push("Nenhuma chave de STT na nuvem está configurada; a transcrição não funcionará até selecionar Whisper local ou configurar uma chave.");
+    }
+    const llm = s.llm || {};
+    const localOpenAI = provider === "openai" && /^(https?:\/\/)?(localhost|127\.0\.0\.1|\[::1\])([:/]|$)/i.test(llm.openai_url || "");
+    if (provider === "ollama" || localOpenAI) {
+      details.push("Ao solicitar aprimoramento ou conversar com IA local, notas e transcrição permanecem neste computador.");
+    } else if (provider && provider !== "none" && provider !== "extractive") {
+      details.push(`Ao solicitar aprimoramento ou conversar com IA, notas e transcrição podem ser enviadas ao provedor ${provider}.`);
+    } else {
+      details.push("Aprimoramento e conversa usam o sumarizador integrado offline, salvo se você configurar um provedor de IA.");
+    }
+    cb.textContent = details.join(" ");
+    const consent = s.consent || {};
+    if (consent.enabled && consent.snippet) {
+      cb.appendChild(document.createTextNode(" Lembrete: " + consent.snippet + " "));
+      const copy = document.createElement("button");
+      copy.type = "button"; copy.className = "copy-link"; copy.textContent = "Copiar aviso";
+      copy.addEventListener("click", async () => {
+        await api().copy_text(consent.snippet);
+        toast("Aviso de consentimento copiado!");
+      });
+      cb.appendChild(copy);
+    }
     cb.classList.add("visible");
-    $("consentCopy").addEventListener("click", async () => {
-      await api().copy_text(state.settings.consent.snippet);
-      toast("Aviso de consentimento copiado!");
-    });
   } else {
     cb.classList.remove("visible");
   }
@@ -280,7 +379,7 @@ function addSegmentEl(s) {
 }
 
 /* ------------------------------------------------------ record / stop */
-async function startNewNote() {
+async function startNewNote(categoryId = null) {
   if (state.recording) {
     if (state.activeMeetingId) openMeeting(state.activeMeetingId);
     return;
@@ -296,7 +395,7 @@ async function startNewNote() {
   toast("Iniciando gravação...");
   try {
     const tpl = (state.settings && state.settings.ui && state.settings.ui.default_template) || "auto";
-    const res = await api().start_meeting("", tpl);
+    const res = await api().start_meeting("", tpl, categoryId);
     if (!res.ok) {
       toast(res.error || "Não foi possível iniciar a gravação", 4000);
       if (res.meeting_id) { await refreshMeetings(); openMeeting(res.meeting_id); }
@@ -679,7 +778,7 @@ async function openSettings() {
     $("setConsent").checked = !!s.consent.enabled;
     $("setConsentText").value = s.consent.snippet;
     if ($("updateCurrentVer")) {
-      const v = (state.settingsState && state.settingsState.version) || "1.4.3";
+      const v = (state.settingsState && state.settingsState.version) || "1.4.4";
       $("updateCurrentVer").textContent = "Versão instalada: v" + v;
     }
     renderTplManager();
@@ -901,6 +1000,21 @@ function wireEvents() {
       await api().rename_meeting(state.current.id, $("noteTitle").value);
       refreshMeetings();
     }
+  });
+  $("meetingCategory")?.addEventListener("change", async () => {
+    if (!state.current) return;
+    const value = $("meetingCategory").value;
+    const result = await api().move_meeting(state.current.id, value || null);
+    if (!result.ok) return toast(result.error || "Não foi possível alterar a categoria.");
+    state.current.category_id = value ? Number(value) : null;
+    await refreshMeetings();
+  });
+  $("btnAddCategory")?.addEventListener("click", async () => {
+    const name = prompt("Nome da categoria:");
+    if (name === null) return;
+    const result = await api().create_category(name);
+    if (!result.ok) return toast(result.error);
+    await refreshMeetings();
   });
   $("tplSelect").addEventListener("change", () => {
     if (state.current) api().set_meeting_template(state.current.id, $("tplSelect").value);

@@ -54,14 +54,18 @@ recriada para funcionar inteiramente na sua máquina e de graça:
   como base.
 - **Biblioteca e pesquisa**: pesquisa de texto completo em todas as transcrições, notas
   e resumos.
+- **Categorias**: crie, renomeie e recolha categorias para organizar reuniões; cada reunião
+  pode ser movida entre categorias, e a preferência de recolhimento fica salva localmente.
 - **Exportação**: exportação em Markdown e cópia para a área de transferência.
 - **Gratuito por padrão, melhor com mais recursos**: sem instalar nada, você ainda tem um
   bom resumo extrativo. Instale o [Ollama](https://ollama.com) para obter IA local
   gratuita ou adicione uma chave da OpenAI, Anthropic ou Groq para resultados mais
   rápidos e precisos. As chaves ficam em um arquivo local.
-- **Privacidade em primeiro lugar**: o áudio é transcrito na memória e descartado
-  (a retenção é opcional), as notas ficam em um SQLite local e não existe telemetria de
-  nenhum tipo.
+- **Privacidade transparente**: notas ficam em SQLite local e não existe telemetria. A
+  transcrição é local por padrão; se você configurar STT na nuvem, os blocos de áudio são
+  enviados ao provedor selecionado. Ao pedir aprimoramento ou conversar com IA, notas e
+  transcrição podem ser enviadas ao provedor configurado. Durante a gravação, a interface
+  informa o processamento conforme suas configurações.
 
 ## Instalação
 

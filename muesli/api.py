@@ -58,11 +58,11 @@ class Api:
 
     # -------------------------------------------------------------- meetings
 
-    def start_meeting(self, title, template_id):
+    def start_meeting(self, title, template_id, category_id=None):
         with self._start_lock:
             if self._session and self._session.status in ("starting", "recording"):
                 return {"ok": False, "error": "A recording is already running."}
-            meeting_id = db.create_meeting(title or "Untitled meeting", template_id)
+            meeting_id = db.create_meeting(title or "Untitled meeting", template_id, category_id)
             try:
                 sess = session.MeetingSession(meeting_id)
                 sess.start()
@@ -106,6 +106,34 @@ class Api:
 
     def list_meetings(self, search):
         return db.list_meetings(search or "")
+
+    def list_categories(self):
+        return db.list_categories()
+
+    def create_category(self, name):
+        category_id = db.create_category(name)
+        if category_id is None:
+            return {"ok": False, "error": "O nome está vazio ou já existe."}
+        return {"ok": True, "category_id": category_id}
+
+    def rename_category(self, category_id, name):
+        ok = db.rename_category(int(category_id), name)
+        return {"ok": ok, "error": "O nome está vazio ou já existe." if not ok else ""}
+
+    def delete_category(self, category_id):
+        db.delete_category(int(category_id))
+        return {"ok": True}
+
+    def move_meeting(self, meeting_id, category_id=None):
+        meeting_id = int(meeting_id)
+        if category_id in (None, ""):
+            category_id = None
+        else:
+            category_id = int(category_id)
+            if not any(c["id"] == category_id for c in db.list_categories()):
+                return {"ok": False, "error": "Categoria não encontrada."}
+        db.update_meeting(meeting_id, category_id=category_id)
+        return {"ok": True}
 
     def get_meeting(self, meeting_id):
         m = db.get_meeting(int(meeting_id))

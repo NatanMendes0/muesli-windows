@@ -68,9 +68,8 @@ DEFAULTS = {
     },
     "consent": {
         "enabled": False,
-        "snippet": ("Aviso rápido: utilizo um aplicativo local que transcreve a nossa chamada "
-                    "no meu próprio computador para eu me concentrar na conversa. Nenhum áudio "
-                    "é enviado para a nuvem. Me avise se preferir que eu desligue."),
+        "snippet": ("Aviso rápido: utilizo o Muesli para registrar notas desta chamada "
+                    "e me concentrar na conversa. Me avise se preferir que eu desligue."),
     },
     "ui": {
         "default_template": "auto",
@@ -99,6 +98,11 @@ def _load_locked() -> dict:
                 merged = _merge(DEFAULTS, json.load(f))
         except (OSError, ValueError):
             merged = DEFAULTS
+        legacy_consent = ("Aviso rápido: utilizo um aplicativo local que transcreve a nossa chamada "
+                          "no meu próprio computador para eu me concentrar na conversa. Nenhum áudio "
+                          "é enviado para a nuvem. Me avise se preferir que eu desligue.")
+        if merged.get("consent", {}).get("snippet") == legacy_consent:
+            merged["consent"]["snippet"] = DEFAULTS["consent"]["snippet"]
         # Deep copy so the cache never aliases DEFAULTS sub-dicts.
         _cache = json.loads(json.dumps(merged))
     return _cache
