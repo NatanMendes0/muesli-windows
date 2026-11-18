@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from muesli import db  # noqa: E402
+from muesli import api, db  # noqa: E402
 
 
 class CategoryTests(unittest.TestCase):
@@ -51,6 +51,21 @@ class CategoryTests(unittest.TestCase):
     def test_category_assignment_rejects_unknown_category(self):
         meeting_id = db.create_meeting("Sem categoria", "auto", category_id=12345)
         self.assertIsNone(db.get_meeting(meeting_id)["category_id"])
+
+    def test_category_assignment_ignores_a_serialized_click_event(self):
+        meeting_id = db.create_meeting("Sem categoria", "auto", category_id={"type": "click"})
+        self.assertIsNone((db.get_meeting(meeting_id) or {}).get("category_id"))
+
+    def test_delete_waits_until_the_recording_transcription_has_drained(self):
+        meeting_id = db.create_meeting("Encerrando", "auto")
+        db.end_meeting(meeting_id, 20)
+        backend = api.Api()
+        backend._draining.add(meeting_id)
+        self.assertFalse(backend.delete_meeting(meeting_id)["ok"])
+        self.assertIsNotNone(db.get_meeting(meeting_id))
+        backend._draining.clear()
+        self.assertTrue(backend.delete_meeting(meeting_id)["ok"])
+        self.assertIsNone(db.get_meeting(meeting_id))
 
 
 if __name__ == "__main__":

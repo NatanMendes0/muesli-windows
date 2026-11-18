@@ -209,6 +209,19 @@ input, textarea, select { font-family: var(--font); color: var(--ink); }
 }
 .meeting-item .meta { font-size: 11.5px; color: var(--faint); margin-top: 1px; display: flex; gap: 7px; }
 .meeting-item .live { color: var(--danger); font-weight: 500; }
+.meeting-context-menu {
+  position: fixed; z-index: 75; min-width: 205px; padding: 4px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: var(--shadow-pop);
+}
+.meeting-context-menu button {
+  display: block; width: 100%; text-align: left; padding: 7px 9px;
+  color: var(--ink); border-radius: 5px; font-size: 12.5px;
+}
+.meeting-context-menu button:not(:disabled):hover,
+.meeting-context-menu button:focus-visible { background: var(--hover-bg); }
+.meeting-context-menu button:disabled { color: var(--faint); cursor: default; }
+.meeting-context-menu #menuDeleteMeeting:not(:disabled) { color: var(--danger); }
 .meeting-category { margin-left:auto; max-width:160px; padding:4px 7px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--muted); font-size:11px; }
 .list-empty { color: var(--faint); font-size: 12.5px; text-align: center; padding: 28px 12px; line-height: 1.7; }
 

@@ -124,8 +124,8 @@ jobs:
           make_latest: true
           generate_release_notes: true
           body: |
-            - O Qwen local propõe um título ao consolidar o resumo. Títulos atribuídos manualmente são preservados.
-            - A geração automática continua na Fila de atas locais, sem precisar clicar em Aprimorar com IA.
+            - Corrigido o erro ao iniciar uma reunião pelos botões da tela inicial e da barra lateral. Novas reuniões aparecem em Sem categoria; o botão + de uma categoria continua gravando nela.
+            - Clique com o botão direito em um card ou use Shift+F10 para aprimorar ou reaprimorar, copiar o prompt para o Copilot ou excluir a reunião com confirmação.
             - Baixe `${{ env.MUESLI_DIST_NAME }}.zip`, extraia toda a pasta e abra `${{ env.MUESLI_DIST_NAME }}.exe`.
             - `Muesli-windows-x64.zip` contém o mesmo pacote e mantém a compatibilidade com atualizadores antigos.
         env:

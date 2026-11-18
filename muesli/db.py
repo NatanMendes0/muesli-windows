@@ -137,7 +137,7 @@ def create_meeting(title: str, template_id: str, category_id=None) -> int:
     c = conn()
     clean = (title or "").strip() or "Untitled meeting"
     manual = 1 if clean != "Untitled meeting" else 0
-    if category_id is not None and not c.execute(
+    if type(category_id) is not int or not c.execute(
             "SELECT 1 FROM meeting_categories WHERE id=?", (category_id,)).fetchone():
         category_id = None
     cur = c.execute(

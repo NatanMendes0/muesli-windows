@@ -147,6 +147,7 @@ async function refreshMeetings() {
       ? String(state.current.category_id) : "";
   }
   const list = $("meetingList");
+  closeMeetingMenu();
   list.innerHTML = "";
   if (!state.meetings.length) {
     list.innerHTML = `<div class="list-empty">${q ? "No matches." : "No meetings yet.<br>Hit New note to start one."}</div>`;
@@ -219,11 +220,117 @@ async function refreshMeetings() {
         const live = m.id === state.activeMeetingId && state.recording;
         btn.innerHTML = `<div class="title"></div><div class="meta">${live ? '<span class="live">● recording</span>' : ""}<span>${fmtDate(m.created_at)}</span><span>${fmtDur(m.duration_sec)}</span></div>`;
         btn.querySelector(".title").textContent = m.title;
+        btn.setAttribute("aria-haspopup", "menu");
         btn.addEventListener("click", () => openMeeting(m.id));
+        btn.addEventListener("contextmenu", event => {
+          event.preventDefault();
+          openMeetingMenu(m, btn, event.clientX, event.clientY);
+        });
+        btn.addEventListener("keydown", event => {
+          if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+            event.preventDefault();
+            const rect = btn.getBoundingClientRect();
+            openMeetingMenu(m, btn, rect.left + 8, rect.bottom);
+          }
+        });
         section.appendChild(btn);
       }
     }
     list.appendChild(section);
+  }
+}
+
+/* ------------------------------------------------------- meeting menu */
+let meetingMenuTarget = null;
+
+function closeMeetingMenu(restoreFocus = false) {
+  if (!meetingMenuTarget) return;
+  const {card} = meetingMenuTarget;
+  meetingMenuTarget = null;
+  $("meetingContextMenu").hidden = true;
+  if (restoreFocus && card.isConnected) card.focus({preventScroll: true});
+}
+
+function openMeetingMenu(meeting, card, x, y) {
+  const menu = $("meetingContextMenu");
+  const running = state.recording && state.activeMeetingId === meeting.id;
+  const enhance = $("menuEnhanceMeeting");
+  enhance.textContent = (state.current?.id === meeting.id ? state.current.summary_md : meeting.preview)?.trim()
+    ? "Reaprimorar" : "Aprimorar";
+  enhance.disabled = running || state.enhanceBusy;
+  $("menuDeleteMeeting").disabled = running;
+  meetingMenuTarget = {meeting, card};
+  menu.hidden = false;
+  menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - menu.offsetWidth - 4))}px`;
+  menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - menu.offsetHeight - 4))}px`;
+  menu.querySelector('button:not(:disabled)').focus({preventScroll: true});
+}
+
+function wireMeetingMenu() {
+  const menu = $("meetingContextMenu");
+  menu.addEventListener("click", event => {
+    const action = event.target.closest("button")?.id;
+    const m = meetingMenuTarget?.meeting;
+    if (!m || !action) return;
+    closeMeetingMenu(true);
+    if (action === "menuEnhanceMeeting") {
+      if (state.current?.id === m.id) enhanceNow();
+      else enhanceMeeting(m.id, m.template_id || "auto",
+        minutesJobs.get(m.id)?.profile || state.settings?.minutes?.profile || "executiva");
+    } else if (action === "menuCopyMeeting") copyCopilotPrompt(m.id);
+    else if (action === "menuDeleteMeeting") deleteSavedMeeting(m.id);
+  });
+  menu.addEventListener("keydown", event => {
+    if (event.key === "Escape") { event.preventDefault(); closeMeetingMenu(true); return; }
+    if (event.key === "Tab") { closeMeetingMenu(true); return; }
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const items = [...menu.querySelectorAll('button:not(:disabled)')];
+    const index = items.indexOf(document.activeElement);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
+      : (index + items.length + (event.key === "ArrowDown" ? 1 : -1)) % items.length;
+    items[next].focus();
+  });
+  document.addEventListener("pointerdown", event => {
+    if (!menu.contains(event.target)) closeMeetingMenu();
+  });
+  $("meetingList").addEventListener("scroll", () => closeMeetingMenu());
+  window.addEventListener("resize", () => closeMeetingMenu());
+}
+
+async function deleteSavedMeeting(mid) {
+  if (mid == null) return;
+  if (state.recording && mid === state.activeMeetingId) {
+    toast("Pare a gravação antes de excluir a reunião.");
+    return;
+  }
+  const title = (state.meetings.find(m => m.id === mid)?.title || "esta reunião");
+  if (!confirm(`Excluir “${title}”, sua transcrição e suas anotações?`)) return;
+  try {
+    const result = await api().delete_meeting(mid);
+    if (!result.ok) return toast(result.error || "Não foi possível excluir a reunião.");
+    state.minutesEdits.delete(mid);
+    if (state.current?.id === mid) {
+      clearTimeout(state.saveTimer);
+      state.current = null;
+      await showHome();
+    } else await refreshMeetings();
+    toast("Reunião excluída.");
+  } catch (err) {
+    toast("Não foi possível excluir a reunião.");
+  }
+}
+
+async function copyCopilotPrompt(mid) {
+  if (!isApiReady()) { toast("Aguarde a conexão com o backend...", 3000); return; }
+  if (mid == null) { toast("Nenhuma reunião selecionada", 2500); return; }
+  try {
+    if (state.current?.id === mid) await flushNotes();
+    const res = await api().copy_copilot_prompt(mid);
+    if (res.ok) toast("Prompt copiado! Cole no Microsoft Copilot com Ctrl+V", 4500);
+    else toast("Falha ao copiar prompt: " + (res.error || ""), 4000);
+  } catch (err) {
+    toast("Erro ao copiar prompt: " + (err.message || err), 4000);
   }
 }
 
@@ -487,6 +594,14 @@ async function startNewNote(categoryId = null) {
     state.recording = true;
     state.activeMeetingId = res.meeting_id;
     state.segCount = 0;
+    if (categoryId === null) {
+      $("searchInput").value = "";
+      try {
+        const key = "muesli_collapsed_categories";
+        const collapsed = JSON.parse(localStorage.getItem(key) || "[]");
+        localStorage.setItem(key, JSON.stringify(collapsed.filter(id => id !== "uncategorized")));
+      } catch (err) { /* no saved collapse preference */ }
+    }
     await refreshMeetings();
     await openMeeting(res.meeting_id);
     if (res.warnings && res.warnings.length) showWarn(res.warnings.join(" "));
@@ -501,7 +616,7 @@ async function startNewNote(categoryId = null) {
     $("btnNewHome").disabled = false;
   }
 }
-window.trayNewNote = startNewNote;
+window.trayNewNote = () => startNewNote(null);
 
 function showWarn(msg) {
   const b = $("warnBanner");
@@ -739,16 +854,24 @@ async function refreshMinutesQueue() {
 }
 
 async function enhanceNow() {
-  if (!state.current || state.enhanceBusy) return;
-  const mid = state.current.id;
+  if (!state.current) return;
+  return enhanceMeeting(state.current.id, $("tplSelect").value, $("minutesProfile").value);
+}
+
+async function enhanceMeeting(mid, templateId, minutesProfile) {
+  if (state.enhanceBusy) return;
+  if (state.recording && mid === state.activeMeetingId) {
+    toast("Pare a gravação antes de aprimorar a reunião.");
+    return;
+  }
   state.enhanceBusy = true;
   const btn = $("btnEnhance");
   btn.disabled = true;
   $("enhanceLabel").innerHTML = 'Aprimorando&hellip; <span class="spin"></span>';
   try {
-    await flushNotes();
-    if (state.current?.id !== mid) return;
-    const res = await api().enhance_meeting(mid, $("tplSelect").value, $("minutesProfile").value);
+    if (state.current?.id === mid) await flushNotes();
+    else toast("Aprimorando reunião…");
+    const res = await api().enhance_meeting(mid, templateId, minutesProfile);
     if (!res.ok) { toast(res.error || "Não foi possível gerar o resumo.", 4000); return; }
     if (res.persistent) {
       watchMinutesJob(mid, res.job_id);
@@ -841,9 +964,11 @@ function scheduleNoteSave() {
 }
 async function flushNotes() {
   clearTimeout(state.saveTimer);
-  if (state.current) {
-    await api().save_notes(state.current.id, $("notepad").value);
-    state.current.notes_md = $("notepad").value;
+  const meeting = state.current;
+  if (meeting) {
+    const notes = $("notepad").value;
+    await api().save_notes(meeting.id, notes);
+    meeting.notes_md = notes;
   }
 }
 
@@ -1067,7 +1192,7 @@ async function openSettings() {
     $("setConsent").checked = !!s.consent.enabled;
     $("setConsentText").value = s.consent.snippet;
     if ($("updateCurrentVer")) {
-      const v = (state.settingsState && state.settingsState.version) || "1.6.1";
+      const v = (state.settingsState && state.settingsState.version) || "1.6.2";
       $("updateCurrentVer").textContent = "Versão instalada: v" + v;
     }
     renderTplManager();
@@ -1278,8 +1403,9 @@ async function refreshStatus() {
 
 /* --------------------------------------------------------------- init */
 function wireEvents() {
-  $("btnNew").addEventListener("click", startNewNote);
-  $("btnNewHome").addEventListener("click", startNewNote);
+  $("btnNew").addEventListener("click", () => startNewNote(null));
+  $("btnNewHome").addEventListener("click", () => startNewNote(null));
+  wireMeetingMenu();
   $("btnStop").addEventListener("click", stopRecording);
   $("btnEnhance").addEventListener("click", enhanceNow);
   $("btnDownloadMinutes").addEventListener("click", downloadMinutesModel);
@@ -1326,15 +1452,7 @@ function wireEvents() {
   $("tplSelect").addEventListener("change", () => {
     if (state.current) api().set_meeting_template(state.current.id, $("tplSelect").value);
   });
-  $("btnDelete").addEventListener("click", async () => {
-    if (!state.current) return;
-    const doomedId = state.current.id; // pin it: awaits below can change the view
-    if (!confirm("Deseja realmente excluir esta reunião, sua transcrição e anotações?")) return;
-    if (doomedId === state.activeMeetingId && state.recording) await stopRecording();
-    await api().delete_meeting(doomedId);
-    if (state.current && state.current.id === doomedId) showHome();
-    else refreshMeetings();
-  });
+  $("btnDelete").addEventListener("click", () => deleteSavedMeeting(state.current?.id));
   $("btnExport").addEventListener("click", async () => {
     if (!isApiReady()) { toast("Aguarde a conexão com o backend...", 3000); return; }
     if (!state.current) { toast("Nenhuma reunião selecionada", 2500); return; }
@@ -1348,21 +1466,7 @@ function wireEvents() {
       toast("Erro ao exportar: " + (e.message || e), 4000);
     }
   });
-  const copyCopilotAction = async () => {
-    if (!isApiReady()) { toast("Aguarde a conexão com o backend...", 3000); return; }
-    if (!state.current) { toast("Nenhuma reunião selecionada", 2500); return; }
-    try {
-      await flushNotes();
-      const res = await api().copy_copilot_prompt(state.current.id);
-      if (res.ok) {
-        toast("Prompt copiado! Cole no Microsoft Copilot com Ctrl+V", 4500);
-      } else {
-        toast("Falha ao copiar prompt: " + (res.error || ""), 4000);
-      }
-    } catch (e) {
-      toast("Erro ao copiar prompt: " + (e.message || e), 4000);
-    }
-  };
+  const copyCopilotAction = () => copyCopilotPrompt(state.current?.id);
   $("btnCopyCopilot")?.addEventListener("click", copyCopilotAction);
   $("btnCopyCopilotBig")?.addEventListener("click", copyCopilotAction);
   $("btnCopySummary").addEventListener("click", async () => {

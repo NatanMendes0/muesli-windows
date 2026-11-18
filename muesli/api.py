@@ -197,13 +197,17 @@ class Api:
         return {"ok": True}
 
     def delete_meeting(self, meeting_id):
-        m = db.get_meeting(int(meeting_id))
+        mid = int(meeting_id)
+        with self._start_lock:
+            if (self._session and self._session.meeting_id == mid) or mid in self._draining:
+                return {"ok": False, "error": "Finalize a gravação e a transcrição antes de excluir a reunião."}
+            m = db.get_meeting(mid)
+            db.delete_meeting(mid)
         if m and m.get("audio_path"):
             try:
                 os.remove(m["audio_path"])
             except OSError:
                 pass
-        db.delete_meeting(int(meeting_id))
         return {"ok": True}
 
     # ---------------------------------------------------------------- enhance

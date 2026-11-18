@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>Muesli v1.6.1</title>
+<title>Muesli v1.6.2</title>
 <script>
 (function(){try{var t=localStorage.getItem("muesli_theme")||"light";if(t==="auto"){t=(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";}document.documentElement.dataset.theme=t;}catch(e){}})();
 </script>
@@ -23,7 +23,7 @@
         <path d="M13.5 7.5 c0 -1.2 1 -1.2 1 -2.4"/>
       </svg>
       <span class="name">Muesli</span>
-      <span class="ver-badge">v1.6.1</span>
+      <span class="ver-badge">v1.6.2</span>
     </div>
 
     <button class="btn-new" id="btnNew"><span class="dot"></span><span id="btnNewLabel">Nova reunião</span></button>
@@ -495,7 +495,7 @@
         <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
           <div>
             <div style="font-size:14px; font-weight:700; color:var(--ink);">Muesli para Windows</div>
-            <div style="font-size:12.5px; color:var(--muted);" id="updateCurrentVer">Versão instalada: v1.6.1</div>
+            <div style="font-size:12.5px; color:var(--muted);" id="updateCurrentVer">Versão instalada: v1.6.2</div>
           </div>
           <span style="flex:1"></span>
           <button class="btn-plain" id="btnCheckUpdatesNow" style="padding:8px 16px; font-weight:600;">
@@ -570,6 +570,11 @@
   </div>
   <button class="uc-btn" id="btnUcOpen">Atualizar</button>
   <button class="uc-close" id="btnUcDismiss" title="Dispensar">&times;</button>
+</div>
+<div class="meeting-context-menu" id="meetingContextMenu" role="menu" aria-label="Ações da reunião" hidden>
+  <button type="button" id="menuEnhanceMeeting" role="menuitem" tabindex="-1">Aprimorar</button>
+  <button type="button" id="menuCopyMeeting" role="menuitem" tabindex="-1">Copiar prompt para o Copilot</button>
+  <button type="button" id="menuDeleteMeeting" role="menuitem" tabindex="-1">Excluir reunião</button>
 </div>
 <div class="toast" id="toast"></div>
 <script src="app.js"></script>

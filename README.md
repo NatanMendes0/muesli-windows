@@ -57,6 +57,9 @@ recriada para funcionar inteiramente na sua máquina e de graça:
   e resumos.
 - **Categorias**: crie, renomeie e recolha categorias para organizar reuniões; cada reunião
   pode ser movida entre categorias, e a preferência de recolhimento fica salva localmente.
+  **Nova reunião** grava em **Sem categoria**; o botão **+** de uma categoria grava nela.
+  Clique com o botão direito no card (ou use **Shift+F10**) para aprimorar, copiar o prompt
+  para o Copilot ou excluir a reunião com confirmação.
 - **Exportação**: exportação em Markdown e cópia para a área de transferência.
 - **Gratuito por padrão, melhor com mais recursos**: sem instalar nada, você ainda tem um
   bom resumo extrativo. Instale o [Ollama](https://ollama.com) para obter IA local
