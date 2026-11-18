@@ -1235,10 +1235,6 @@ async function openSettings(tab = null) {
     if ($("setDisableUiGpu")) $("setDisableUiGpu").checked = !!(s.ui && s.ui.disable_gpu);
     $("setConsent").checked = !!s.consent.enabled;
     $("setConsentText").value = s.consent.snippet;
-    if ($("updateCurrentVer")) {
-      const v = (state.settingsState && state.settingsState.version) || "1.6.5";
-      $("updateCurrentVer").textContent = "Versão instalada: v" + v;
-    }
     renderTplManager();
   } catch (err) {
     console.error("Erro ao carregar configurações:", err);
@@ -1447,6 +1443,14 @@ function injectFonts(faces) {
 async function refreshStatus() {
   try {
     const st = await api().get_state();
+    if (typeof st.version === "string" && /^\d+\.\d+\.\d+$/.test(st.version)) {
+      const label = "v" + st.version;
+      const badge = $("appVersionBadge");
+      badge.textContent = label;
+      badge.hidden = false;
+      document.title = "Muesli " + label;
+      $("updateCurrentVer").textContent = "Versão instalada: " + label;
+    }
     injectFonts(st.font_faces);
     const bits = [];
     // escapeHtml on provider/model strings: they come from user settings.
@@ -1765,10 +1769,6 @@ async function checkUpdatesUi(interactive = true) {
     }
     updateData = res;
     if (readyUpdate?.tag !== res.latest_version) readyUpdate = null;
-    if ($("updateCurrentVer")) {
-      $("updateCurrentVer").textContent = "Versão instalada: v" + res.current_version;
-    }
-
     if (res.has_update) {
       if (statusEl) statusEl.innerHTML = `<span style="color:var(--ok); font-weight:700;">🎉 Nova versão disponível: ${escapeHtml(res.latest_version)}!</span>`;
       $("updateTitle").textContent = res.release_name || res.latest_version;

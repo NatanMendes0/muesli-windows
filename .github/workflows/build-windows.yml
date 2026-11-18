@@ -20,6 +20,11 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Set up Node for UI regression tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
       - name: Set release name and Windows version resource
         shell: pwsh
         run: |
@@ -94,8 +99,8 @@ jobs:
           Write-Host "Verified $($exe.Name) version $($exe.VersionInfo.FileVersion)"
           $test = Start-Process -FilePath $exe.FullName -ArgumentList '--selftest' -Wait -PassThru
           $result = Get-Content (Join-Path $dir 'selftest.json') -Raw | ConvertFrom-Json
-          if ($test.ExitCode -ne 0 -or -not $result.ok) {
-            throw "Executable self-test failed: $($result.error)"
+          if ($test.ExitCode -ne 0 -or -not $result.ok -or $result.version -ne $env:MUESLI_VERSION) {
+            throw "Executable self-test failed or reported the wrong version: $($result.error)"
           }
           Remove-Item (Join-Path $dir 'selftest.json')
 
@@ -115,7 +120,22 @@ jobs:
           $exe = Join-Path $stage "$env:MUESLI_DIST_NAME.exe"
           $test = Start-Process -FilePath $exe -WorkingDirectory $stage -ArgumentList '--selftest' -Wait -PassThru
           $result = Get-Content (Join-Path $stage 'selftest.json') -Raw | ConvertFrom-Json
-          if ($test.ExitCode -ne 0 -or -not $result.ok) { throw 'The staged update did not pass the self-test' }
+          if ($test.ExitCode -ne 0 -or -not $result.ok -or $result.version -ne $env:MUESLI_VERSION) {
+            throw 'The staged update did not pass the self-test or reported the wrong version'
+          }
+
+      - name: Test the UI and version badge from the staged package
+        run: |
+          $tools = Join-Path $env:RUNNER_TEMP 'muesli-ui-test-tools'
+          npm install --prefix "$tools" --no-save --no-package-lock --ignore-scripts --no-audit --no-fund jsdom@31.0.1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $stage = Join-Path $env:RUNNER_TEMP 'muesli-update-smoke'
+          $result = Get-Content (Join-Path $stage 'selftest.json') -Raw | ConvertFrom-Json
+          $env:NODE_PATH = Join-Path $tools 'node_modules'
+          $env:MUESLI_TEST_UI_DIR = Join-Path $stage '_internal\ui'
+          $env:MUESLI_TEST_VERSION = $result.version
+          node --test tests/test_meeting_ui.cjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -134,8 +154,7 @@ jobs:
           make_latest: true
           generate_release_notes: true
           body: |
-            - NVIDIA NIM em Configurações → Modelos de IA: chave separada da OpenAI, modelo configurável e botão Testar conexão que envia apenas uma frase de exemplo.
-            - Selecione NVIDIA NIM (nuvem) explicitamente para usar o provedor no chat e no aprimoramento normal. Essas ações podem enviar texto à NVIDIA; a transcrição e a fila de Atas locais não mudam.
+            - O selo ao lado de Muesli e a versão em Configurações → Atualizações agora exibem a versão do executável em execução, sem depender de um número fixo no HTML.
             - A partir da v1.6.3, use Configurações → Atualizações para baixar e depois escolha Instalar e reiniciar. Na v1.6.2 ou anterior, baixe `${{ env.MUESLI_DIST_NAME }}.zip`, extraia a pasta inteira e abra `${{ env.MUESLI_DIST_NAME }}.exe`.
             - `Muesli-windows-x64.zip` contém o mesmo pacote e mantém a compatibilidade com atualizadores antigos.
         env:

@@ -1,10 +1,12 @@
 // Sidebar integration tests. Run with jsdom available to Node (e.g. via NODE_PATH).
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
+const { join } = require('node:path');
 const { test } = require('node:test');
 const { JSDOM } = require('jsdom');
-const script = readFileSync('ui/app.js', 'utf8');
-const html = readFileSync('ui/index.html', 'utf8');
+const uiDir = process.env.MUESLI_TEST_UI_DIR || 'ui';
+const script = readFileSync(join(uiDir, 'app.js'), 'utf8');
+const html = readFileSync(join(uiDir, 'index.html'), 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function setup(t) {
@@ -38,11 +40,31 @@ function setup(t) {
   w.confirm = () => true;
   // Wire the real page without boot polls or platform hardware requests.
   w.eval(script.slice(0, script.lastIndexOf('\nwireEvents();')) +
-    '\nwireEvents(); window.ui = {state, refreshMeetings, openMeeting, checkUpdatesUi, startDownloadUpdate};');
+    '\nwireEvents(); window.ui = {state, refreshStatus, refreshMeetings, openMeeting, checkUpdatesUi, startDownloadUpdate};');
   w.ui.state.settings = {minutes: {enabled: true, profile: 'treinamento'}};
   const card = title => [...w.document.querySelectorAll('.meeting-item')].find(b => b.querySelector('.title').textContent === title);
   return {w, $, card, calls, api};
 }
+
+test('a versão do executável substitui o selo antigo e permanece igual ao verificar atualizações', async t => {
+  const {w, $, api} = setup(t);
+  const version = process.env.MUESLI_TEST_VERSION || '9.8.7';
+  const badge = w.document.querySelector('.logo .ver-badge');
+  badge.textContent = 'v1.6.5';
+  api.get_state = async () => ({version, llm: {}, stt_model: {}, audio_backend_ok: true});
+  await w.ui.refreshStatus();
+  assert.equal(badge.textContent, `v${version}`);
+  assert.equal(badge.hidden, false);
+  assert.equal(w.document.title, `Muesli v${version}`);
+  assert.equal($('updateCurrentVer').textContent, `Versão instalada: v${version}`);
+
+  api.check_updates = async () => ({ok: true, current_version: '1.6.5', latest_version: 'v99.0.0',
+    has_update: true, can_install: true});
+  await w.ui.checkUpdatesUi(false);
+  assert.equal(badge.textContent, `v${version}`);
+  assert.equal($('updateCurrentVer').textContent, `Versão instalada: v${version}`);
+  assert.equal($('ucVer').textContent, 'v99.0.0');
+});
 
 for (const id of ['btnNewHome', 'btnNew']) {
   test(`${id} inicia e mostra a reunião em Sem categoria`, async t => {

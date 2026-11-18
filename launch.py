@@ -75,9 +75,10 @@ def selftest():
     Writes selftest.json next to the executable; exit code 0 on success."""
     import json
     import traceback
-    out = {"ok": False}
+    out: dict[str, str | int | bool] = {"ok": False}
     try:
-        from muesli import audio
+        from muesli import APP_VERSION, audio
+        out["version"] = APP_VERSION
         d = audio.list_devices()
         out["audio_backend"] = d["ok"]
         out["mics"] = len(d["mics"])
