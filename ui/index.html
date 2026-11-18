@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>Muesli v1.4.4</title>
+<title>Muesli v1.5.0</title>
 <script>
 (function(){try{var t=localStorage.getItem("muesli_theme")||"light";if(t==="auto"){t=(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";}document.documentElement.dataset.theme=t;}catch(e){}})();
 </script>
@@ -23,7 +23,7 @@
         <path d="M13.5 7.5 c0 -1.2 1 -1.2 1 -2.4"/>
       </svg>
       <span class="name">Muesli</span>
-      <span class="ver-badge">v1.4.4</span>
+      <span class="ver-badge">v1.5.0</span>
     </div>
 
     <button class="btn-new" id="btnNew"><span class="dot"></span><span id="btnNewLabel">Nova reunião</span></button>
@@ -89,6 +89,7 @@
         </div>
         <div class="meta-row">
           <span id="noteMeta"></span>
+          <span id="minutesStatus" role="status"></span>
           <select id="meetingCategory" class="meeting-category" title="Categoria da reunião">
             <option value="">Sem categoria</option>
           </select>
@@ -353,6 +354,27 @@
       </div>
 
       <div class="set-section" data-set="ai">
+        <div class="ai-prov-card">
+          <strong>Atas locais (offline)</strong>
+          <p class="hint">Qwen2.5 1.5B · 1,12 GB. Funciona sem Ollama ou chave de API. Só gera atas; não altera a transcrição nem o provedor do chat.</p>
+          <button type="button" class="btn-mini" id="btnDownloadMinutes">Baixar modelo para atas locais</button>
+          <progress id="minutesDownloadProgress" max="100" value="0" hidden aria-label="Download do modelo"></progress>
+          <p id="minutesModelHint" class="hint" role="status"></p>
+          <div class="check-row">
+            <input type="checkbox" id="setLocalMinutes">
+            <label for="setLocalMinutes">Gerar ata local ao finalizar e ao clicar em Aprimorar com IA</label>
+          </div>
+          <div class="check-row">
+            <input type="checkbox" id="setLocalMinutesVulkan">
+            <label for="setLocalMinutesVulkan">Tentar GPU integrada Intel (Vulkan · experimental)</label>
+          </div>
+          <div class="hint">A CPU é o padrão. Se o driver não oferecer Vulkan ou a GPU falhar, o Muesli usa a CPU.</div>
+          <div class="check-row">
+            <input type="checkbox" id="setLocalMinutesAc">
+            <label for="setLocalMinutesAc">Aguardar conexão à tomada antes de gerar</label>
+          </div>
+          <div class="hint">A ata usa um formato executivo fixo. Para também manter o áudio offline, use o Whisper local na aba Transcrição.</div>
+        </div>
         <div class="field">
           <label>Provedor de IA para Resumo e Chat</label>
           <select id="setLlmProvider">
@@ -458,7 +480,7 @@
         <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
           <div>
             <div style="font-size:14px; font-weight:700; color:var(--ink);">Muesli para Windows</div>
-            <div style="font-size:12.5px; color:var(--muted);" id="updateCurrentVer">Versão instalada: v1.4.4</div>
+            <div style="font-size:12.5px; color:var(--muted);" id="updateCurrentVer">Versão instalada: v1.5.0</div>
           </div>
           <span style="flex:1"></span>
           <button class="btn-plain" id="btnCheckUpdatesNow" style="padding:8px 16px; font-weight:600;">

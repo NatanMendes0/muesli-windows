@@ -4,6 +4,8 @@ __pycache__/
 *.pyc
 dist/
 build/
+llama-runtime/
+llama-runtime-vulkan/
 *.spec
 
 # Fonts are fetched at first run from Fontshare (EULA forbids redistributing them)

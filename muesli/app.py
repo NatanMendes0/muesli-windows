@@ -100,6 +100,7 @@ class App:
         webview.start(debug=self.debug, private_mode=False)
         # Window destroyed: make sure everything winds down.
         self.quitting = True
+        self.api._close_minutes()
         if self.api._session is not None:
             try:
                 self.api._session.stop()

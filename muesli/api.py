@@ -15,7 +15,7 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-from . import audio, chatlogic, db, enhance, fonts, keypool, session, settings, stt, templates
+from . import audio, chatlogic, db, enhance, fonts, keypool, local_minutes, session, settings, stt, templates
 from . import APP_VERSION
 
 
@@ -25,6 +25,16 @@ class Api:
         self._jobs = {}            # job_id -> {state, result, error, kind, done_at}
         self._window = None        # set by app.py
         self._start_lock = threading.Lock()
+        self._stop_job = None
+        self._draining = set()
+        self._minutes_active = False
+        self._capture_requested = False
+        self._minutes_cancel = threading.Event()
+        self._minutes_idle = threading.Event()
+        self._minutes_idle.set()
+        self._closing = threading.Event()
+        self._minutes_jobs = {}
+        self._minutes_download_job = None
 
     def _new_job(self, kind):
         job_id = uuid.uuid4().hex[:12]
@@ -60,24 +70,35 @@ class Api:
 
     def start_meeting(self, title, template_id, category_id=None):
         with self._start_lock:
-            if self._session and self._session.status in ("starting", "recording"):
+            if self._session or self._capture_requested:
                 return {"ok": False, "error": "A recording is already running."}
-            meeting_id = db.create_meeting(title or "Untitled meeting", template_id, category_id)
+            self._capture_requested = True
+            self._minutes_cancel.set()
+        self._minutes_idle.wait(timeout=3)
+        with self._start_lock:
             try:
-                sess = session.MeetingSession(meeting_id)
-                sess.start()
-                self._session = sess
-            except Exception as e:
-                db.end_meeting(meeting_id, 0)
-                return {"ok": False, "error": str(e), "meeting_id": meeting_id}
-            return {"ok": True, "meeting_id": meeting_id,
-                    "warnings": self._session.capture.warnings}
+                if self._minutes_active:
+                    return {"ok": False, "error": "Encerrando a geração de ata local. Tente iniciar novamente."}
+                meeting_id = db.create_meeting(title or "Untitled meeting", template_id, category_id)
+                try:
+                    sess = session.MeetingSession(meeting_id)
+                    sess.start()
+                    self._session = sess
+                except Exception as e:
+                    db.end_meeting(meeting_id, 0)
+                    return {"ok": False, "error": str(e), "meeting_id": meeting_id}
+                return {"ok": True, "meeting_id": meeting_id, "warnings": sess.capture.warnings}
+            finally:
+                self._capture_requested = False
 
     def stop_meeting(self):
-        if not self._session:
-            return {"ok": False, "error": "No active recording."}
-        sess = self._session
-        job_id = self._new_job("stop")
+        with self._start_lock:
+            if not self._session:
+                return {"ok": False, "error": "No active recording."}
+            if self._stop_job:
+                return {"ok": True, "job_id": self._stop_job}
+            sess = self._session
+            job_id = self._stop_job = self._new_job("stop")
 
         def worker():
             try:
@@ -87,14 +108,27 @@ class Api:
                     guess = enhance.suggest_title(db.get_segments(sess.meeting_id))
                     if guess:
                         db.update_meeting(sess.meeting_id, title=guess, title_manual=0)
+                with self._start_lock:
+                    self._draining.add(sess.meeting_id)
+                    self._session = None
+                    self._stop_job = None
+                    enabled = settings.load().get("minutes", {}).get("enabled")
+                    minutes_job_id = self._queue_minutes(sess.meeting_id, automatic=True) if enabled else None
                 self._jobs[job_id].update(state="done", done_at=time.time(),
-                                          result={"meeting_id": sess.meeting_id,
-                                                  "duration": duration})
+                                          result={"meeting_id": sess.meeting_id, "duration": duration,
+                                                  "minutes_job_id": minutes_job_id})
+                try:
+                    sess.wait_for_transcription()
+                finally:
+                    with self._start_lock:
+                        self._draining.discard(sess.meeting_id)
             except Exception as e:
                 self._jobs[job_id].update(state="error", error=str(e), done_at=time.time())
             finally:
-                if self._session is sess:
-                    self._session = None
+                with self._start_lock:
+                    if self._session is sess:
+                        self._session = None
+                        self._stop_job = None
 
         threading.Thread(target=worker, daemon=True).start()
         return {"ok": True, "job_id": job_id}
@@ -172,6 +206,11 @@ class Api:
 
     def enhance_meeting(self, meeting_id, template_id):
         meeting_id = int(meeting_id)
+        if settings.load().get("minutes", {}).get("enabled"):
+            with self._start_lock:
+                if self._session and self._session.meeting_id == meeting_id:
+                    return {"ok": False, "error": "Finalize a gravação antes de gerar uma ata local."}
+                return {"ok": True, "job_id": self._queue_minutes(meeting_id)}
         job_id = self._new_job("enhance")
 
         def worker():
@@ -199,6 +238,108 @@ class Api:
 
         threading.Thread(target=worker, daemon=True).start()
         return {"ok": True, "job_id": job_id}
+
+    def _queue_minutes(self, meeting_id, automatic=False):
+        # Caller holds _start_lock; duplicate requests share one job.
+        if meeting_id in self._minutes_jobs:
+            return self._minutes_jobs[meeting_id]
+        jid = self._new_job("minutes")
+        self._minutes_jobs[meeting_id] = jid
+
+        def worker():
+            claimed = False
+            job = self._jobs[jid]
+            try:
+                while True:
+                    cfg = settings.load().get("minutes", {})
+                    if not cfg.get("enabled"):
+                        raise RuntimeError("A geração de atas locais foi desativada.")
+                    m = db.get_meeting(meeting_id)
+                    if not m or not m.get("ended_at"):
+                        raise RuntimeError("Finalize a gravação antes de gerar uma ata local.")
+                    if automatic and m.get("summary_md"):
+                        job.update(state="done", done_at=time.time(), result={"skipped": True})
+                        return
+                    with self._start_lock:
+                        if self._closing.is_set():
+                            raise RuntimeError("O Muesli está sendo encerrado.")
+                        if self._session or self._draining or self._capture_requested:
+                            job["detail"] = "Aguardando a gravação e a transcrição terminarem…"
+                        elif self._minutes_active:
+                            job["detail"] = "Aguardando outra ata local…"
+                        elif cfg.get("ac_only") and not local_minutes.power_connected():
+                            job["detail"] = "Ata local aguardando conexão à tomada…"
+                        else:
+                            claimed = self._minutes_active = True
+                            self._minutes_cancel.clear()
+                            self._minutes_idle.clear()
+                            job["detail"] = "Gerando ata local…"
+                            break
+                    self._closing.wait(1)
+                notes = (m.get("notes_md") or "").strip()
+                transcript = enhance.format_transcript(db.get_segments(meeting_id)).strip()
+                evidence = "\n\n".join(filter(None, (f"Anotações:\n{notes}" if notes else "", transcript)))
+                if not evidence and automatic:
+                    job.update(state="done", done_at=time.time(), result={"skipped": True})
+                    return
+                generator = local_minutes.MinutesGenerator(cfg.get("prefer_vulkan", False), self._minutes_cancel,
+                                                            lambda detail: job.update(detail=detail))
+                started = time.monotonic()
+                md = local_minutes.summarize(m, evidence, generator)
+                if not db.write_local_minutes(meeting_id, md, original=m.get("summary_md") or ""):
+                    raise RuntimeError("A reunião ou a ata mudou durante a geração. O rascunho existente foi preservado.")
+                job.update(state="done", done_at=time.time(), result={
+                    "summary_md": md, "provider": "local_minutes", "meeting_id": meeting_id,
+                    "backend": generator.backend, "elapsed_sec": round(time.monotonic() - started)})
+            except Exception as e:
+                job.update(state="error", error=str(e), done_at=time.time())
+            finally:
+                with self._start_lock:
+                    if claimed:
+                        self._minutes_active = False
+                        self._minutes_idle.set()
+                    self._minutes_jobs.pop(meeting_id, None)
+
+        threading.Thread(target=worker, daemon=True).start()
+        return jid
+
+    def _close_minutes(self):
+        with self._start_lock:
+            self._closing.set()
+            self._minutes_cancel.set()
+        self._minutes_idle.wait(timeout=3)
+
+    def save_minutes_edit(self, meeting_id, markdown):
+        markdown = (markdown or "").strip()
+        return {"ok": bool(markdown and db.write_local_minutes(int(meeting_id), markdown))}
+
+    def local_minutes_status(self):
+        return {"installed": local_minutes.model_installed(),
+                "runtime": local_minutes.runtime_path() is not None,
+                "size": local_minutes.MODEL_BYTES,
+                "download_job_id": self._minutes_download_job}
+
+    def download_minutes_model(self):
+        with self._start_lock:
+            if self._minutes_download_job:
+                return {"ok": True, "job_id": self._minutes_download_job}
+            if local_minutes.runtime_path() is None:
+                return {"ok": False, "error": "Motor de atas indisponível. Use o pacote Windows x64."}
+            jid = self._minutes_download_job = self._new_job("minutes_download")
+
+        def worker():
+            job = self._jobs[jid]
+            try:
+                local_minutes.download(lambda received: job.update(received=received))
+                job.update(state="done", result={"installed": True}, done_at=time.time())
+            except Exception as e:
+                job.update(state="error", error=str(e), done_at=time.time())
+            finally:
+                with self._start_lock:
+                    self._minutes_download_job = None
+
+        threading.Thread(target=worker, daemon=True).start()
+        return {"ok": True, "job_id": jid}
 
     # ------------------------------------------------------------------- chat
 

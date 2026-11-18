@@ -77,3 +77,8 @@ class MeetingSession:
             db.end_meeting(self.meeting_id, duration, self.retain_path)
             self._stopped_duration = duration
             return duration
+
+    def wait_for_transcription(self):
+        """The bounded stop join can return before the final chunk is done."""
+        if self.transcriber is not None:
+            self.transcriber.join()

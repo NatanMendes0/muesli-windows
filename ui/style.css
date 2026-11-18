@@ -1,6 +1,20 @@
 /* Muesli UI. Quiet paper-and-ink design: hairline borders, restrained color,
    typography does the work. Satoshi is bundled locally (see fonts/FFL.txt). */
 
+.minutes-editor {
+  display: block;
+  width: 100%;
+  min-height: 240px;
+  margin-bottom: 8px;
+  resize: vertical;
+  padding: 10px;
+  background: var(--panel-soft);
+  color: var(--ink);
+  border: 1px solid var(--border);
+}
+
+#minutesStatus { color: var(--info-fg); }
+
 @font-face {
   font-family: "Satoshi";
   src: url("fonts/Satoshi-Variable.woff2") format("woff2");
@@ -333,6 +347,10 @@ body.page-hidden .dot { animation: none !important; }
 }
 .md blockquote { border-left: 2px solid var(--border-strong); padding-left: 12px; color: var(--muted); margin: 8px 0; }
 .md strong { font-weight: 700; color: var(--ink); }
+.md-table-wrap { overflow-x: auto; }
+.md table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+.md th, .md td { text-align: left; padding: 6px 9px; border: 1px solid var(--border); }
+.md th { background: var(--panel-soft); }
 
 /* transcript */
 .transcript-body { flex: 1; overflow-y: auto; padding: 14px 18px 18px; }

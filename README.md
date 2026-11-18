@@ -6,8 +6,9 @@
 **Uma alternativa gratuita e de código aberto ao Granola para Windows.** O Muesli é um
 bloco de notas de reuniões com IA que registra notas sem que um bot entre na chamada. Ele
 captura o microfone e o áudio do sistema diretamente, transcreve a reunião localmente com
-o Whisper e transforma suas notas brutas em um resumo limpo e estruturado. Sem conta,
-nuvem, assinatura ou telemetria. Suas reuniões nunca saem do computador.
+o Whisper e transforma suas notas brutas em um resumo estruturado. Não requer conta nem
+assinatura. Com Whisper e atas locais, áudio e texto ficam no computador; serviços de
+nuvem são opcionais e seguem a configuração de cada recurso.
 
 ![Licença MIT](https://img.shields.io/badge/license-MIT-green)
 ![Plataforma](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
@@ -33,7 +34,7 @@ recriada para funcionar inteiramente na sua máquina e de graça:
 | Onde o áudio é processado | Seu computador (Whisper local) | Transcrição na nuvem |
 | Onde as notas ficam | SQLite local em `%APPDATA%` | Nuvem deles |
 | Conta necessária | Nenhuma | Sim |
-| Aprimoramento por IA | Ollama local, sua própria chave de API ou um resumidor offline integrado | Modelos na nuvem |
+| Aprimoramento por IA | Atas locais com Qwen, Ollama, sua própria chave de API ou um resumidor extrativo offline | Modelos na nuvem |
 | Suporte ao Windows | Sim, Windows em primeiro lugar | Sim |
 | Funciona offline | Sim (após o download inicial do modelo) | Não |
 
@@ -106,6 +107,32 @@ disso, o Muesli funciona totalmente offline.
 
 O Muesli fica na bandeja do sistema: fechar a janela a oculta; clique com o botão direito
 no ícone da bandeja para sair. A inicialização automática fica em Configurações.
+
+### Atas executivas offline (Windows x64)
+
+1. Em **Configurações → IA → Atas locais**, clique em **Baixar modelo para atas locais**.
+   O Qwen2.5 1.5B Instruct Q4_K_M é opcional e ocupa 1,12 GB. O pacote inclui o motor
+   `llama.cpp`; não precisa de Ollama, GPU, servidor ou chave de API.
+2. Marque **Gerar ata local** e salve. Após parar a reunião, o Muesli espera a
+   transcrição terminar, processa transcrições longas em partes e salva um rascunho
+   na aba **Aprimorado (IA)**. Use **Editar ata** para revisar e salvar o Markdown.
+3. Na bateria, o motor usa até 2 threads (até 4 na tomada) e roda com prioridade
+   abaixo da normal. Se marcar **Aguardar conexão à tomada**, a ata espera enquanto
+   o Muesli estiver aberto, inclusive na bandeja. Se sair do aplicativo, reabra a
+   reunião e use **Aprimorar com IA** para iniciar de novo. Iniciar uma nova gravação
+   também interrompe uma geração em curso para priorizar a captura.
+
+O formato da ata é fixo: resumo, deliberações e plano de ação. O modelo é usado só
+para atas. Para que o áudio também fique offline, selecione **Whisper local** na
+aba **Transcrição**. O chat continua com seu provedor separado. Se executar do
+código-fonte, prepare o motor com `.\scripts\install-minutes-runtime.ps1` no PowerShell.
+
+**GPU Intel (experimental):** em **Atas locais**, marque **Tentar GPU integrada Intel
+(Vulkan)** para testar com o driver instalado. Se o Muesli não detectar uma GPU Intel
+compatível ou a execução falhar, ele volta à CPU sem recorrer à nuvem. A notificação
+de conclusão informa o motor usado na etapa final. Compare com a opção desmarcada
+na mesma reunião e nas mesmas condições de energia. Para executar do código-fonte,
+prepare também o motor experimental com `.\scripts\install-minutes-runtime.ps1 -Backend vulkan`.
 
 ## Microfone e áudio do sistema no Windows
 

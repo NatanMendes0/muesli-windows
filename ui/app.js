@@ -57,13 +57,29 @@ function inlineMd(s) {
 }
 function renderMd(md) {
   const lines = (md || "").split(/\r?\n/);
+  const cells = row => {
+    const text = (row || "").trim();
+    if (!text.startsWith("|") || !text.endsWith("|")) return [];
+    return text.slice(1, -1).split(/(?<!\\)\|/).map(cell => cell.trim().replace(/\\\|/g, "|"));
+  };
   let html = "", inUl = false, inOl = false, inQuote = false;
   const closeLists = () => {
     if (inUl) { html += "</ul>"; inUl = false; }
     if (inOl) { html += "</ol>"; inOl = false; }
     if (inQuote) { html += "</blockquote>"; inQuote = false; }
   };
-  for (const raw of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const header = cells(raw), separator = cells(lines[i + 1]);
+    if (header.length && header.length === separator.length && separator.every(cell => /^:?-{3,}:?$/.test(cell))) {
+      closeLists();
+      const row = (items, tag) => `<tr>${items.map(cell => `<${tag}>${inlineMd(escapeHtml(cell))}</${tag}>`).join("")}</tr>`;
+      html += `<div class="md-table-wrap"><table><thead>${row(header, "th")}</thead><tbody>`;
+      i++;
+      while (cells(lines[i + 1]).length === header.length) html += row(cells(lines[++i]), "td");
+      html += "</tbody></table></div>";
+      continue;
+    }
     const line = escapeHtml(raw);
     const h = line.match(/^(#{1,3})\s+(.*)/);
     const ul = line.match(/^\s*[-*]\s+(.*)/);
@@ -240,6 +256,7 @@ async function openMeeting(id) {
 
   renderTranscript(m.segments || []);
   renderEnhanced(m.summary_md, m.summary_provider);
+  $("minutesStatus").textContent = minutesDetails.get(m.id) || "";
   renderChat($("chatPanel"), m.chat || []);
   if ($("tabCopilot")?.classList.contains("active")) {
     selectTab("copilot");
@@ -284,7 +301,9 @@ function setRecordingUi(on) {
     }
     const llm = s.llm || {};
     const localOpenAI = provider === "openai" && /^(https?:\/\/)?(localhost|127\.0\.0\.1|\[::1\])([:/]|$)/i.test(llm.openai_url || "");
-    if (provider === "ollama" || localOpenAI) {
+    if (s.minutes?.enabled) {
+      details.push("As atas são geradas neste computador. O chat segue a configuração separada e, se usar um provedor na nuvem, pode enviar notas e transcrição.");
+    } else if (provider === "ollama" || localOpenAI) {
       details.push("Ao solicitar aprimoramento ou conversar com IA local, notas e transcrição permanecem neste computador.");
     } else if (provider && provider !== "none" && provider !== "extractive") {
       details.push(`Ao solicitar aprimoramento ou conversar com IA, notas e transcrição podem ser enviadas ao provedor ${provider}.`);
@@ -339,10 +358,47 @@ function renderEnhanced(md, provider) {
       Após a reunião, clique em <b>Aprimorar com IA</b> ou use a aba <b>Prompt Copilot</b>.</div>`;
     return;
   }
-  const provNames = { ollama: "IA Local (Ollama)", extractive: "sumarizador integrado (offline)",
+  const provNames = { local_minutes: "Qwen local · rascunho para revisão", ollama: "IA Local (Ollama)", extractive: "sumarizador integrado (offline)",
                       openrouter: "OpenRouter", anthropic: "Anthropic (Claude)", openai: "OpenAI (ChatGPT)", groq: "Groq" };
   body.innerHTML = `<div class="provider-tag">Gerado com ${provNames[provider] || provider || "IA"}</div>` +
                    renderMd(md);
+  if (provider === "local_minutes") {
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "btn-mini";
+    edit.textContent = "Editar ata";
+    edit.onclick = () => editLocalMinutes(body, md);
+    body.prepend(edit);
+  }
+}
+
+function editLocalMinutes(body, md) {
+  const mid = state.current.id;
+  body.innerHTML = '<textarea class="minutes-editor" aria-label="Ata em Markdown"></textarea>' +
+    '<button type="button" class="btn-mini">Salvar ata</button> <button type="button" class="btn-mini">Cancelar</button>';
+  const editor = body.querySelector("textarea");
+  const [save, cancel] = body.querySelectorAll("button");
+  editor.value = md;
+  editor.focus();
+  cancel.onclick = () => renderEnhanced(md, "local_minutes");
+  save.onclick = async () => {
+    const value = editor.value.trim();
+    if (!value) { toast("A ata não pode ficar vazia."); return; }
+    save.disabled = cancel.disabled = true;
+    try {
+      const res = await api().save_minutes_edit(mid, value);
+      if (!res.ok) { toast("Não foi possível salvar a ata."); return; }
+      if (state.current?.id === mid) {
+        state.current.summary_md = value;
+        renderEnhanced(value, "local_minutes");
+      }
+      toast("Ata revisada salva.");
+    } catch (err) {
+      toast("Não foi possível salvar a ata.");
+    } finally {
+      save.disabled = cancel.disabled = false;
+    }
+  };
 }
 
 function renderTranscript(segments) {
@@ -482,10 +538,9 @@ async function stopRecording() {
   const stoppedId = state.activeMeetingId;
   $("btnStop").textContent = "Finalizando…";
   $("btnStop").disabled = true;
+  if (state.current?.id === stoppedId) await flushNotes();
   const res = await api().stop_meeting();
-  if (res.ok) {
-    await waitJob(res.job_id);
-  }
+  const stopped = res.ok ? await waitJob(res.job_id) : null;
   state.recording = false;
   state.activeMeetingId = null;
   stopPolling();
@@ -496,14 +551,18 @@ async function stopRecording() {
   // Only reload the view if the user is still looking at the stopped meeting.
   if (state.current && state.current.id === stoppedId) {
     await openMeeting(stoppedId);
-    toast("Gravação finalizada. Aprimorando notas com IA...");
-    await enhanceNow();
-  } else {
-    toast("Gravação finalizada. Transcrição salva.");
   }
+  if (!stopped) { if (!res.ok) toast(res.error); return; }
+  if (stopped.minutes_job_id) {
+    toast("Gravação finalizada. Ata local na fila.");
+    watchMinutes(stoppedId, stopped.minutes_job_id);
+  } else if (state.current?.id === stoppedId) {
+    toast("Gravação finalizada. Aprimorando notas com IA…");
+    await enhanceNow();
+  } else toast("Gravação finalizada. Transcrição salva.");
 }
 
-function waitJob(jobId) {
+function waitJob(jobId, onProgress) {
   return new Promise((resolve) => {
     let inFlight = false;
     const t = setInterval(async () => {
@@ -513,6 +572,7 @@ function waitJob(jobId) {
       try { j = await api().job_status(jobId); }
       catch (e) { inFlight = false; return; }
       inFlight = false;
+      if (j.state === "running" && onProgress) onProgress(j);
       if (j.state === "done") { clearInterval(t); resolve(j.result); }
       else if (j.state === "error" || j.state === "unknown") {
         clearInterval(t);
@@ -524,6 +584,23 @@ function waitJob(jobId) {
 }
 
 /* ----------------------------------------------------------- enhance */
+const minutesDetails = new Map();
+
+function setMinutesDetail(mid, detail) {
+  if (detail) minutesDetails.set(mid, detail);
+  else minutesDetails.delete(mid);
+  if (state.current?.id === mid && $("minutesStatus").textContent !== detail) {
+    $("minutesStatus").textContent = detail;
+  }
+}
+
+async function watchMinutes(mid, jid) {
+  setMinutesDetail(mid, "Ata local na fila…");
+  const out = await waitJob(jid, j => setMinutesDetail(mid, j.detail || "Ata local na fila…"));
+  setMinutesDetail(mid, "");
+  if (out && !out.skipped) showEnhancement(mid, out);
+}
+
 async function enhanceNow() {
   if (!state.current || state.enhanceBusy) return;
   const mid = state.current.id;
@@ -531,32 +608,43 @@ async function enhanceNow() {
   const btn = $("btnEnhance");
   btn.disabled = true;
   $("enhanceLabel").innerHTML = 'Aprimorando&hellip; <span class="spin"></span>';
-  await flushNotes();
-  const res = await api().enhance_meeting(mid, $("tplSelect").value);
-  const out = res.ok ? await waitJob(res.job_id) : null;
-  state.enhanceBusy = false;
-  btn.disabled = false;
-  $("enhanceLabel").textContent = "Aprimorar com IA";
-  if (out) {
-    // Render only if the same meeting is still on screen; the summary is in
-    // the DB either way and shows on next open.
-    if (state.current && state.current.id === mid) {
-      state.current.summary_md = out.summary_md;
-      state.current.summary_provider = out.provider;
-      if (out.title) {
-        state.current.title = out.title;
-        if (document.activeElement !== $("noteTitle")) {
-          $("noteTitle").value = out.title === "Untitled meeting" ? "" : out.title;
-        }
-      }
-      renderEnhanced(out.summary_md, out.provider);
-      selectTab("enhanced");
-    }
-    refreshMeetings();
-    toast("Notas aprimoradas com sucesso!");
-  } else {
-    toast("Falha no aprimoramento. Verifique as Configurações de IA.", 4000);
+  try {
+    await flushNotes();
+    if (state.current?.id !== mid) return;
+    const res = await api().enhance_meeting(mid, $("tplSelect").value);
+    if (!res.ok) { toast(res.error || "Não foi possível gerar o resumo.", 4000); return; }
+    const out = await waitJob(res.job_id, j => {
+      if (j.kind === "minutes") setMinutesDetail(mid, j.detail || "Ata local na fila…");
+    });
+    if (out && !out.skipped) showEnhancement(mid, out);
+  } catch (err) {
+    toast("Não foi possível gerar o resumo.", 4000);
+  } finally {
+    setMinutesDetail(mid, "");
+    state.enhanceBusy = false;
+    btn.disabled = false;
+    $("enhanceLabel").textContent = "Aprimorar com IA";
   }
+}
+
+function showEnhancement(mid, out) {
+  if (state.current?.id === mid) {
+    state.current.summary_md = out.summary_md;
+    state.current.summary_provider = out.provider;
+    if (out.title) {
+      state.current.title = out.title;
+      if (document.activeElement !== $("noteTitle")) {
+        $("noteTitle").value = out.title === "Untitled meeting" ? "" : out.title;
+      }
+    }
+    renderEnhanced(out.summary_md, out.provider);
+    selectTab("enhanced");
+  }
+  refreshMeetings();
+  if (out.provider === "local_minutes") {
+    const detail = out.backend ? ` · ${out.backend} · ${out.elapsed_sec} s` : "";
+    toast(`Rascunho da ata local salvo${detail}.`, 6500);
+  } else toast("Notas aprimoradas com sucesso!");
 }
 
 /* -------------------------------------------------------------- chat */
@@ -616,6 +704,55 @@ async function flushNotes() {
 }
 
 /* ----------------------------------------------------------- settings */
+let minutesDownloadWatch = null;
+
+async function syncMinutesModel() {
+  const status = await api().local_minutes_status();
+  $("btnDownloadMinutes").disabled = !status.runtime || status.installed || !!status.download_job_id;
+  // An existing opt-in can still be cleared if the model was removed.
+  $("setLocalMinutes").disabled = (!status.runtime || !status.installed) && !$("setLocalMinutes").checked;
+  if (!status.download_job_id) {
+    $("minutesModelHint").textContent = !status.runtime ? "Motor indisponível. Use o pacote Windows x64 do Muesli."
+      : status.installed ? "Modelo instalado. Você já pode ativar as atas locais."
+      : "O download é opcional. Depois de instalado, o modelo funciona offline.";
+  }
+  return status;
+}
+
+async function watchMinutesDownload(jid, total) {
+  if (minutesDownloadWatch === jid) return;
+  minutesDownloadWatch = jid;
+  const bar = $("minutesDownloadProgress");
+  bar.value = 0;
+  bar.hidden = false;
+  $("minutesModelHint").textContent = "Baixando modelo…";
+  try {
+    const out = await waitJob(jid, j => {
+      bar.value = Math.floor(100 * (j.received || 0) / total);
+      $("minutesModelHint").textContent = `Baixando modelo… ${bar.value}%`;
+    });
+    await syncMinutesModel();
+    if (out) toast("Modelo de atas instalado.");
+  } finally {
+    bar.hidden = true;
+    minutesDownloadWatch = null;
+  }
+}
+
+async function downloadMinutesModel() {
+  const button = $("btnDownloadMinutes");
+  button.disabled = true;
+  try {
+    const res = await api().download_minutes_model();
+    const status = await syncMinutesModel();
+    if (res.ok) await watchMinutesDownload(res.job_id, status.size);
+    else toast(res.error);
+  } catch (err) {
+    button.disabled = false;
+    toast("Não foi possível iniciar ou acompanhar o download.");
+  }
+}
+
 function applyTheme(mode) {
   const m = mode || "light";
   try { localStorage.setItem("muesli_theme", m); } catch (e) {}
@@ -749,6 +886,13 @@ async function openSettings() {
     }
     syncSttUi();
     // ai
+    $("setLocalMinutes").checked = !!s.minutes?.enabled;
+    $("setLocalMinutesAc").checked = !!s.minutes?.ac_only;
+    $("setLocalMinutesVulkan").checked = !!s.minutes?.prefer_vulkan;
+    const minutesModel = await syncMinutesModel();
+    if (minutesModel.download_job_id && !minutesDownloadWatch) {
+      watchMinutesDownload(minutesModel.download_job_id, minutesModel.size).catch(() => toast("Não foi possível acompanhar o download."));
+    }
     $("setLlmProvider").value = s.llm.provider;
     $("setOllamaUrl").value = s.llm.ollama_url;
     const models = await api().list_ollama_models();
@@ -778,7 +922,7 @@ async function openSettings() {
     $("setConsent").checked = !!s.consent.enabled;
     $("setConsentText").value = s.consent.snippet;
     if ($("updateCurrentVer")) {
-      const v = (state.settingsState && state.settingsState.version) || "1.4.4";
+      const v = (state.settingsState && state.settingsState.version) || "1.5.0";
       $("updateCurrentVer").textContent = "Versão instalada: v" + v;
     }
     renderTplManager();
@@ -823,6 +967,11 @@ async function saveSettings() {
       groq_model: $("setSttGroqModel") ? $("setSttGroqModel").value : "whisper-large-v3-turbo",
       cloud_interval_sec: $("setSttCloudInterval") ? parseInt($("setSttCloudInterval").value, 10) || 12 : 12,
       cloud_fallback: $("setSttCloudFallback") ? $("setSttCloudFallback").checked : true,
+    },
+    minutes: {
+      enabled: $("setLocalMinutes").checked,
+      ac_only: $("setLocalMinutesAc").checked,
+      prefer_vulkan: $("setLocalMinutesVulkan").checked,
     },
     llm: {
       provider: $("setLlmProvider").value,
@@ -986,6 +1135,7 @@ function wireEvents() {
   $("btnNewHome").addEventListener("click", startNewNote);
   $("btnStop").addEventListener("click", stopRecording);
   $("btnEnhance").addEventListener("click", enhanceNow);
+  $("btnDownloadMinutes").addEventListener("click", downloadMinutesModel);
   $("searchInput").addEventListener("input", () => refreshMeetings());
   $("notepad").addEventListener("input", scheduleNoteSave);
   $("tabNotes").addEventListener("click", () => selectTab("notes"));

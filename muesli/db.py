@@ -137,6 +137,20 @@ def update_meeting(meeting_id: int, **fields):
     c.execute(f"UPDATE meetings SET {', '.join(sets)} WHERE id=?", vals)
     c.commit()
 
+def write_local_minutes(meeting_id, markdown, original=None):
+    """Preserve edits made while the model was running."""
+    c = conn()
+    if original is None:
+        cursor = c.execute("UPDATE meetings SET summary_md=? WHERE id=? AND summary_provider='local_minutes'",
+                           (markdown, meeting_id))
+    else:
+        cursor = c.execute("UPDATE meetings SET summary_md=?, summary_provider='local_minutes' "
+                           "WHERE id=? AND COALESCE(summary_md, '')=?",
+                           (markdown, meeting_id, original))
+    c.commit()
+    return cursor.rowcount == 1
+
+
 def get_meeting(meeting_id: int):
     row = conn().execute("SELECT * FROM meetings WHERE id=?", (meeting_id,)).fetchone()
     return dict(row) if row else None
