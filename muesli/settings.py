@@ -148,13 +148,14 @@ def get_launch_at_startup() -> bool:
     except OSError:
         return False
 
-def set_launch_at_startup(enabled: bool) -> bool:
+def set_launch_at_startup(enabled: bool, *, executable=None) -> bool:
     if sys.platform != "win32":
         return False
     import winreg
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
         if enabled:
-            winreg.SetValueEx(key, APP_DIR_NAME, 0, winreg.REG_SZ, _launch_command())
+            command = f'"{executable}"' if executable else _launch_command()
+            winreg.SetValueEx(key, APP_DIR_NAME, 0, winreg.REG_SZ, command)
         else:
             try:
                 winreg.DeleteValue(key, APP_DIR_NAME)

@@ -1192,7 +1192,7 @@ async function openSettings() {
     $("setConsent").checked = !!s.consent.enabled;
     $("setConsentText").value = s.consent.snippet;
     if ($("updateCurrentVer")) {
-      const v = (state.settingsState && state.settingsState.version) || "1.6.2";
+      const v = (state.settingsState && state.settingsState.version) || "1.6.3";
       $("updateCurrentVer").textContent = "Versão instalada: v" + v;
     }
     renderTplManager();
@@ -1669,8 +1669,11 @@ function wireEvents() {
 
 /* ----------------------------------------------------------- updater */
 let updateData = null;
+let readyUpdate = null;
+let updateBusy = false;
 
 async function checkUpdatesUi(interactive = true) {
+  if (updateBusy) return;
   const statusEl = $("updateStatusText");
   const actionArea = $("updateActionArea");
   const corner = $("updateCornerBanner");
@@ -1685,6 +1688,7 @@ async function checkUpdatesUi(interactive = true) {
 
   try {
     const res = await api().check_updates();
+    if (updateBusy) return;
     if (!res.ok) {
       if (interactive && statusEl) {
         statusEl.textContent = "Não foi possível verificar atualizações: " + (res.error || "erro de rede");
@@ -1692,6 +1696,7 @@ async function checkUpdatesUi(interactive = true) {
       return;
     }
     updateData = res;
+    if (readyUpdate?.tag !== res.latest_version) readyUpdate = null;
     if ($("updateCurrentVer")) {
       $("updateCurrentVer").textContent = "Versão instalada: v" + res.current_version;
     }
@@ -1702,7 +1707,12 @@ async function checkUpdatesUi(interactive = true) {
       $("updateNotes").textContent = res.release_notes || "Novas melhorias e correções de estabilidade.";
       actionArea.style.display = "block";
       $("updateDownloadProgress").style.display = "none";
-      $("btnDownloadUpdate").disabled = false;
+      const btn = $("btnDownloadUpdate");
+      btn.hidden = !res.can_install && !readyUpdate;
+      btn.disabled = false;
+      btn.textContent = readyUpdate ? "Instalar e reiniciar" : "Baixar atualização";
+      if (readyUpdate) statusEl.textContent = "Atualização verificada. Pronta para instalar.";
+      else if (!res.can_install) statusEl.textContent = "Nova versão disponível no GitHub. A instalação pelo app está indisponível neste momento.";
       if (corner) {
         if ($("ucVer")) $("ucVer").textContent = res.latest_version;
         if ($("ucSub")) $("ucSub").textContent = "Instalada: v" + res.current_version;
@@ -1723,51 +1733,47 @@ async function checkUpdatesUi(interactive = true) {
 }
 
 async function startDownloadUpdate() {
-  if (!updateData || !updateData.zip_url) return;
+  if ((!updateData?.can_install && !readyUpdate) || updateBusy) return;
   const btn = $("btnDownloadUpdate");
   const progEl = $("updateDownloadProgress");
   const pctEl = $("updatePct");
+  const statusEl = $("updateStatusText");
+  updateBusy = true;
   btn.disabled = true;
-  progEl.style.display = "block";
-  toast("Iniciando download da atualização...");
-
+  let restarting = false;
   try {
-    const res = await api().download_update(updateData.zip_url, updateData.zip_name);
-    if (!res.ok) {
-      toast("Falha ao iniciar download: " + (res.error || ""));
-      btn.disabled = false;
-      progEl.style.display = "none";
+    if (readyUpdate) {
+      await flushNotes();
+      const res = await api().install_update(readyUpdate.jobId);
+      if (!res.ok) { statusEl.textContent = res.error; return; }
+      restarting = true;
+      statusEl.textContent = "Instalando a atualização e reiniciando o Muesli…";
       return;
     }
-    const jobId = res.job_id;
-    const pollInterval = setInterval(async () => {
-      try {
-        const j = await api().job_status(jobId);
-        if (j.progress !== undefined) {
-          pctEl.textContent = `(${j.progress}%)`;
-        }
-        if (j.state === "done") {
-          clearInterval(pollInterval);
-          btn.disabled = false;
-          progEl.style.display = "none";
-          toast("Download concluído! A pasta Downloads foi aberta.", 6000);
-          $("updateStatusText").innerHTML = `<span style="color:var(--ok); font-weight:700;">✅ Arquivo salvo em Downloads\\${escapeHtml(j.result?.filename || "")}. Extraia a pasta inteira e abra o executável da nova versão.</span>`;
-        } else if (j.state === "error") {
-          clearInterval(pollInterval);
-          btn.disabled = false;
-          progEl.style.display = "none";
-          toast("Erro no download: " + (j.error || ""));
-        }
-      } catch (err) {
-        clearInterval(pollInterval);
-        btn.disabled = false;
-        progEl.style.display = "none";
-      }
-    }, 600);
-  } catch (e) {
-    btn.disabled = false;
+    pctEl.textContent = "";
+    progEl.style.display = "block";
+    statusEl.textContent = "Baixando e verificando a atualização…";
+    const tag = updateData.latest_version;
+    const res = await api().prepare_update(tag);
+    if (!res.ok) { statusEl.textContent = res.error; return; }
+    const out = await waitJob(res.job_id, job => {
+      if (job.progress !== undefined) pctEl.textContent = `(${job.progress}%)`;
+    });
+    if (out?.tag === tag) {
+      readyUpdate = {jobId: res.job_id, tag};
+      btn.textContent = "Instalar e reiniciar";
+      statusEl.textContent = "Atualização verificada. Instale quando terminar de gravar.";
+    } else {
+      statusEl.textContent = "Não foi possível preparar a atualização. A versão atual foi mantida.";
+    }
+  } catch (err) {
+    statusEl.textContent = "Não foi possível atualizar: " + (err.message || err);
+  } finally {
+    if (!restarting) {
+      updateBusy = false;
+      btn.disabled = false;
+    }
     progEl.style.display = "none";
-    toast("Erro ao baixar: " + (e.message || e));
   }
 }
 
@@ -1819,11 +1825,14 @@ async function boot() {
     await refreshMeetings();
     try { renderChat($("homeChatPanel"), await api().get_global_chat()); } catch (e) {}
     await refreshStatus();
-    setInterval(refreshStatus, 5000);
     syncMinutesControls(state.current);
     await refreshMinutesQueue();
+    const startup = await api().confirm_update_startup();
+    if (!startup.ok) throw new Error("Não foi possível confirmar a inicialização da atualização.");
+    setInterval(refreshStatus, 5000);
     setInterval(refreshMinutesQueue, 1500);
-    toast("Muesli pronto para uso!", 2000);
+    toast(startup.rolled_back ? "A nova versão não iniciou. A versão anterior foi reaberta." : "Muesli pronto para uso!",
+      startup.rolled_back ? 7000 : 2000);
     setTimeout(() => checkUpdatesUi(false), 1200);
   } catch (err) {
     console.error("Erro durante inicialização:", err);

@@ -37,10 +37,11 @@ function setup(t) {
   w.pywebview = { api };
   w.confirm = () => true;
   // Wire the real page without boot polls or platform hardware requests.
-  w.eval(script.slice(0, script.lastIndexOf('\nwireEvents();')) + '\nwireEvents(); window.ui = {state, refreshMeetings, openMeeting};');
+  w.eval(script.slice(0, script.lastIndexOf('\nwireEvents();')) +
+    '\nwireEvents(); window.ui = {state, refreshMeetings, openMeeting, checkUpdatesUi, startDownloadUpdate};');
   w.ui.state.settings = {minutes: {enabled: true, profile: 'treinamento'}};
   const card = title => [...w.document.querySelectorAll('.meeting-item')].find(b => b.querySelector('.title').textContent === title);
-  return {w, $, card, calls};
+  return {w, $, card, calls, api};
 }
 
 for (const id of ['btnNewHome', 'btnNew']) {
@@ -122,4 +123,31 @@ test('o menu pelo teclado protege uma gravação ativa', async t => {
   $('searchInput').dispatchEvent(new w.MouseEvent('pointerdown', {bubbles: true}));
   assert.equal($('meetingContextMenu').hidden, true);
   assert.deepEqual(calls, []);
+});
+
+test('baixar atualização não reinicia; só instala depois de confirmar e salvar notas', async t => {
+  const {w, $, api, calls} = setup(t);
+  await w.ui.openMeeting(10);
+  await tick();
+  api.check_updates = async () => ({ok: true, current_version: '1.6.2', latest_version: 'v1.6.3',
+    can_install: true, has_update: true});
+  api.prepare_update = async tag => { calls.push(['prepare', tag]); return {ok: true, job_id: 'update'}; };
+  api.job_status = async () => ({state: 'done', result: {tag: 'v1.6.3'}});
+  api.save_notes = async id => { calls.push(['save', id]); return {ok: true}; };
+  let draining = true;
+  api.install_update = async id => {
+    calls.push(['install', id]);
+    return draining ? {ok: false, error: 'Aguarde a transcrição'} : {ok: true};
+  };
+  await w.ui.checkUpdatesUi();
+  await w.ui.startDownloadUpdate();
+  assert.deepEqual(calls, [['prepare', 'v1.6.3']]);
+  assert.equal($('btnDownloadUpdate').textContent, 'Instalar e reiniciar');
+  await w.ui.startDownloadUpdate();
+  assert.match($('updateStatusText').textContent, /Aguarde a transcrição/);
+  assert.equal($('btnDownloadUpdate').disabled, false);
+  draining = false;
+  await w.ui.startDownloadUpdate();
+  assert.deepEqual(calls.slice(1), [['save', 10], ['install', 'update'], ['save', 10], ['install', 'update']]);
+  assert.equal($('btnDownloadUpdate').disabled, true);
 });

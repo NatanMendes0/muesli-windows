@@ -99,9 +99,27 @@ def selftest():
 
 
 if __name__ == "__main__":
-    unblock_self()
     if "--selftest" in sys.argv:
+        unblock_self()
         selftest()
-    kill_other_instances()
+
+    from pathlib import Path
+    from muesli import APP_VERSION, updater
+
+    root = updater.install_root()
+    trial = len(sys.argv) == 3 and sys.argv[1] == updater.TRIAL_ARG and updater.valid_trial(sys.argv[2])
+    rollback = updater.ROLLBACK_ARG in sys.argv
+    if not trial and not rollback:
+        active = updater.active_executable(root, APP_VERSION) if root else None
+        if active:
+            try:
+                updater.spawn(active, *sys.argv[1:])
+            except OSError:
+                pass  # The downloaded copy is still usable if policy blocks the managed copy.
+            else:
+                sys.exit(0)
+        if not root or not Path(sys.executable).resolve().is_relative_to(root):
+            unblock_self()
+        kill_other_instances()
     from muesli.app import main
     main()

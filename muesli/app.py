@@ -1,11 +1,12 @@
 """App entry: pywebview window plus pystray tray icon. Closing the window hides it."""
 import os
+from pathlib import Path
 import sys
 import threading
 
 import webview
 
-from . import APP_NAME, APP_VERSION, api as api_mod, db, fonts, icon as icon_mod, settings, stt
+from . import APP_NAME, APP_VERSION, api as api_mod, db, fonts, icon as icon_mod, settings, stt, updater
 
 if getattr(sys, "frozen", False):
     # PyInstaller bundle: data files live under sys._MEIPASS.
@@ -18,6 +19,10 @@ class App:
     def __init__(self, debug=False):
         self.debug = debug
         self.api = api_mod.Api()
+        self.api._quit_for_update = self._quit
+        if len(sys.argv) == 3 and sys.argv[1] == updater.TRIAL_ARG and updater.valid_trial(sys.argv[2]):
+            self.api._trial_token = sys.argv[2]
+        self.api._update_rolled_back = updater.ROLLBACK_ARG in sys.argv
         self.window = None
         self.tray = None
         self.tray_ready = threading.Event()
@@ -53,10 +58,12 @@ class App:
                 self.api._session.stop()
             except Exception:
                 pass
-        if self.tray is not None:
-            self.tray.stop()
-        if self.window is not None:
-            self.window.destroy()
+        try:
+            if self.tray is not None:
+                self.tray.stop()
+        finally:
+            if self.window is not None:
+                self.window.destroy()
 
     def _start_tray(self):
         try:
@@ -113,6 +120,14 @@ class App:
                 self.tray.stop()
             except Exception:
                 pass
+        root, candidate = self.api._update_root, self.api._pending_update
+        if root and candidate:
+            installed = updater.restart_into(root, candidate, Path(sys.executable))
+            if installed and settings.get_launch_at_startup():
+                try:
+                    settings.set_launch_at_startup(True, executable=candidate)
+                except OSError:
+                    pass  # Existing startup entries still forward to the installed version.
 
 
 def main():

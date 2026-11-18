@@ -3,10 +3,12 @@
 Slow operations (enhance, chat) run as background jobs the UI polls with job_status.
 """
 import os
+from pathlib import Path
 import subprocess
 import sys
 import threading
 import time
+from typing import Callable
 import uuid
 import webbrowser
 
@@ -16,7 +18,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from . import audio, chatlogic, db, enhance, fonts, keypool, local_minutes, minutes_pipeline, minutes_queue, session, settings, stt, templates
-from . import APP_VERSION
+from . import APP_VERSION, updater
 
 
 class Api:
@@ -37,6 +39,13 @@ class Api:
         self._minutes_wake = threading.Event()
         self._minutes_running_id = None
         self._minutes_download_job = None
+        self._update_root = updater.install_root()
+        self._update_job: tuple[str, str] | None = None
+        self._staged_update: tuple[str, str, Path] | None = None
+        self._pending_update: Path | None = None
+        self._quit_for_update: Callable[[], None] | None = None
+        self._trial_token: str | None = None
+        self._update_rolled_back = False
 
     def _new_job(self, kind):
         job_id = uuid.uuid4().hex[:12]
@@ -46,8 +55,9 @@ class Api:
 
     def _prune_jobs(self):
         now = time.time()
+        staged = self._staged_update
         for jid in [j for j, job in self._jobs.items()
-                    if job["done_at"] and now - job["done_at"] > 600]:
+                    if job["done_at"] and now - job["done_at"] > 600 and (not staged or j != staged[1])]:
             self._jobs.pop(jid, None)
 
     # ------------------------------------------------------------- app state
@@ -72,6 +82,9 @@ class Api:
 
     def start_meeting(self, title, template_id, category_id=None):
         with self._start_lock:
+            if self._pending_update or (self._trial_token and self._update_root
+                                        and not updater.trial_committed(self._update_root, Path(sys.executable))):
+                return {"ok": False, "error": "Aguarde a conclusão da atualização para gravar."}
             if self._session or self._capture_requested:
                 return {"ok": False, "error": "A recording is already running."}
             self._capture_requested = True
@@ -714,10 +727,7 @@ tags: [reuniao/executiva]
         try:
             url = "https://api.github.com/repos/NatanMendes0/muesli-windows/releases/latest"
             headers = {"User-Agent": f"Muesli-App/{APP_VERSION}"}
-            try:
-                r = requests.get(url, timeout=10, headers=headers)
-            except requests.exceptions.SSLError:
-                r = requests.get(url, timeout=10, headers=headers, verify=False)
+            r = requests.get(url, timeout=10, headers=headers, allow_redirects=False)
 
             if r.status_code == 200:
                 data = r.json()
@@ -728,12 +738,18 @@ tags: [reuniao/executiva]
                 if not assets.get(zip_name) and assets.get("Muesli-windows-x64.zip"):
                     zip_name = "Muesli-windows-x64.zip"
                 zip_url = assets.get(zip_name)
+                try:
+                    updater.verified_asset(data, latest_tag)
+                    can_install = has_update and self._update_root is not None
+                except updater.UpdateError:
+                    can_install = False
 
                 return {
                     "ok": True,
                     "current_version": APP_VERSION,
                     "latest_version": latest_tag,
                     "has_update": has_update,
+                    "can_install": can_install,
                     "release_name": data.get("name") or latest_tag,
                     "release_notes": data.get("body") or "Atualizações e correções de estabilidade.",
                     "html_url": data.get("html_url") or "https://github.com/NatanMendes0/muesli-windows/releases",
@@ -743,13 +759,12 @@ tags: [reuniao/executiva]
 
             # Fallback via redirect HTML caso api.github.com retorne 403 (rate limit em IP corporativo)
             web_url = "https://github.com/NatanMendes0/muesli-windows/releases/latest"
-            try:
-                rw = requests.get(web_url, timeout=10, headers=headers, allow_redirects=False)
-            except requests.exceptions.SSLError:
-                rw = requests.get(web_url, timeout=10, headers=headers, allow_redirects=False, verify=False)
+            rw = requests.get(web_url, timeout=10, headers=headers, allow_redirects=False)
             loc = rw.headers.get("Location") or ""
-            if "/releases/tag/" in loc:
-                latest_tag = loc.rstrip("/").split("/releases/tag/")[-1].strip()
+            prefix = updater.REPO + '/releases/tag/'
+            if loc.startswith(prefix):
+                latest_tag = loc[len(prefix):]
+                updater.version(latest_tag)
                 has_update = parse_ver(latest_tag) > parse_ver(APP_VERSION)
                 zip_name = (f"Muesli-windows-x64-{latest_tag}.zip" if parse_ver(latest_tag) >= [1, 6, 1]
                             else "Muesli-windows-x64.zip")
@@ -758,6 +773,7 @@ tags: [reuniao/executiva]
                     "current_version": APP_VERSION,
                     "latest_version": latest_tag,
                     "has_update": has_update,
+                    "can_install": False,
                     "release_name": latest_tag,
                     "release_notes": "Nova versão disponível no GitHub Releases.",
                     "html_url": loc,
@@ -766,6 +782,8 @@ tags: [reuniao/executiva]
                 }
 
             return {"ok": False, "error": f"Status HTTP {r.status_code}"}
+        except requests.exceptions.SSLError:
+            return {"ok": False, "error": "O certificado HTTPS do GitHub não pôde ser validado."}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
@@ -775,61 +793,64 @@ tags: [reuniao/executiva]
             return {"ok": True}
         return {"ok": False, "error": "URL inválida"}
 
-    def download_update(self, zip_url, filename=""):
-        job_id = self._new_job("download_update")
+    def prepare_update(self, tag):
+        root = self._update_root
+        if root is None:
+            return {"ok": False, "error": "Use o pacote distribuído para Windows para atualizar pelo app."}
+        try:
+            if updater.version(tag) <= updater.version('v' + APP_VERSION):
+                raise updater.UpdateError('Essa versão não é mais recente.')
+        except updater.UpdateError as exc:
+            return {"ok": False, "error": str(exc)}
+        with self._start_lock:
+            if self._pending_update:
+                return {"ok": False, "error": "A instalação já está em andamento."}
+            if self._update_job:
+                if self._update_job[0] == tag:
+                    return {"ok": True, "job_id": self._update_job[1]}
+                return {"ok": False, "error": "Já existe uma atualização sendo preparada."}
+            if self._staged_update and self._staged_update[0] == tag:
+                return {"ok": True, "job_id": self._staged_update[1]}
+            job_id = self._new_job('prepare_update')
+            self._update_job = (tag, job_id)
 
         def worker():
+            job = self._jobs[job_id]
             try:
-                downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
-                if not os.path.exists(downloads_dir):
-                    downloads_dir = os.path.expanduser("~")
-
-                safe_name = filename or "Muesli-windows-update.zip"
-                dest_path = os.path.join(downloads_dir, safe_name)
-
-                headers = {"User-Agent": f"Muesli-App/{APP_VERSION}"}
-                try:
-                    r = requests.get(zip_url, stream=True, timeout=180, headers=headers)
-                except requests.exceptions.SSLError:
-                    r = requests.get(zip_url, stream=True, timeout=180, headers=headers, verify=False)
-
-                r.raise_for_status()
-                total_bytes = int(r.headers.get("content-length", 0))
-                downloaded = 0
-
-                with open(dest_path, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=1024 * 64):
-                        if chunk:
-                            f.write(chunk)
-                            downloaded += len(chunk)
-                            if total_bytes > 0:
-                                self._jobs[job_id]["progress"] = int((downloaded / total_bytes) * 100)
-
-                # Desbloqueia o arquivo baixado automaticamente no Windows
-                try:
-                    os.remove(dest_path + ":Zone.Identifier")
-                except OSError:
-                    pass
-
-                # Abre a pasta Downloads no Windows Explorer
-                try:
-                    if hasattr(os, "startfile"):
-                        os.startfile(downloads_dir)
-                    else:
-                        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", downloads_dir])
-                except Exception:
-                    pass
-
-                self._jobs[job_id].update(
-                    state="done",
-                    result={"path": dest_path, "filename": safe_name},
-                    done_at=time.time()
-                )
-            except Exception as e:
-                self._jobs[job_id].update(state="error", error=str(e), done_at=time.time())
+                candidate = updater.stage_update(root, tag, APP_VERSION, lambda value: job.update(progress=value))
+                with self._start_lock:
+                    self._staged_update = (tag, job_id, candidate)
+                    job.update(state='done', result={'tag': tag}, done_at=time.time())
+            except updater.UpdateError as exc:
+                job.update(state='error', error=str(exc), done_at=time.time())
+            except Exception:
+                job.update(state='error', error='Não foi possível preparar a atualização.', done_at=time.time())
+            finally:
+                with self._start_lock:
+                    self._update_job = None
 
         threading.Thread(target=worker, daemon=True).start()
         return {"ok": True, "job_id": job_id}
+
+    def install_update(self, job_id):
+        with self._start_lock:
+            if self._session or self._capture_requested or self._draining:
+                return {"ok": False, "error": "Aguarde a gravação e a transcrição terminarem antes de atualizar."}
+            candidate = self._staged_update
+            if self._pending_update or not candidate or candidate[1] != job_id or not self._quit_for_update:
+                return {"ok": False, "error": "Nenhuma atualização verificada está pronta para instalar."}
+            self._pending_update = candidate[2]
+            threading.Timer(.25, self._quit_for_update).start()
+        return {"ok": True}
+
+    def confirm_update_startup(self):
+        if not self._trial_token or self._update_root is None:
+            return {"ok": True, "rolled_back": self._update_rolled_back}
+        try:
+            ready = updater.mark_ready(self._update_root, Path(sys.executable), APP_VERSION, self._trial_token)
+        except OSError:
+            ready = False
+        return {"ok": ready}
 
     def exit_app(self):
         def _die():

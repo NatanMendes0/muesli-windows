@@ -81,6 +81,17 @@ recriada para funcionar inteiramente na sua máquina e de graça:
    assinada: clique em "Mais informações" e depois em "Executar assim mesmo", ou compile
    a partir do código-fonte.
 
+**Atualizações pelo aplicativo:** extraia uma vez uma versão que inclua o atualizador.
+Depois, em **Configurações → Atualizações**, selecione **Baixar atualização** e, quando
+não estiver gravando nem finalizando a transcrição, **Instalar e reiniciar**. O pacote
+é instalado ao lado das outras versões em `%LOCALAPPDATA%\Programs\Muesli`, sem
+assistente ou elevação. O executável com atualizador pode abrir a versão instalada
+nas próximas execuções; mantenha o atalho original se quiser continuar usando-o.
+Reuniões, configurações e modelos do usuário não fazem parte do ZIP atualizado.
+Se o HTTPS, o SHA-256 ou a abertura da nova versão falharem, o app não troca a versão
+ativa. Se uma política corporativa bloquear downloads ou a execução nessa pasta,
+consulte a TI. A atualização pelo app não altera essas políticas.
+
 ### Opção 2: executar a partir do código-fonte
 
 ```
