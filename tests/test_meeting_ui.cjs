@@ -161,6 +161,43 @@ test('Limpar fila pede confirmação, descarta a prévia e preserva a ata salva'
   assert.doesNotMatch($('enhancedBody').textContent, /Prévia descartável/);
 });
 
+test('NVIDIA NIM testa e salva a própria chave sem modificar a da OpenAI ou a transcrição', async t => {
+  const {w, $, api, calls} = setup(t);
+  const config = {audio: {}, stt: {engine: 'local'}, llm: {provider: 'openai',
+    openai_keys: ['********1234'], nvidia_key: '********9876', nvidia_model: 'nvidia/example'}, consent: {}};
+  api.get_settings = async () => config;
+  api.list_audio_devices = async () => ({ok: true, mics: [], loopbacks: []});
+  api.local_minutes_status = async () => ({});
+  api.list_ollama_models = async () => [];
+  api.get_state = async () => ({llm: {}, stt_model: {}, audio_backend_ok: true});
+  api.test_nvidia_key = async (...args) => { calls.push(['testNvidia', ...args]); return {ok: true}; };
+  api.save_settings = async patch => { calls.push(['saveSettings', patch]); return {ok: true}; };
+  $('btnSettings').click();
+  await tick();
+  assert.ok($('setNvidiaKey'));
+  assert.equal($('setNvidiaKey').type, 'password');
+  assert.equal($('setNvidiaKey').value, '********9876');
+  $('setLlmProvider').value = 'nvidia';
+  assert.equal($('setLlmProvider').value, 'nvidia');
+  $('setNvidiaKey').value = 'new-fixture-nvidia';
+  $('setModelNvidia').value = 'nvidia/test-chat';
+  $('btnTestNvidiaKey').click();
+  await tick();
+  assert.deepEqual(calls, [['testNvidia', 'new-fixture-nvidia', 'nvidia/test-chat']]);
+  assert.match($('nvidiaKeyTestStatus').textContent, /Conexão/);
+  $('btnSaveSettings').click();
+  await tick();
+  const [action, patch] = calls.at(-1);
+  assert.equal(action, 'saveSettings');
+  assert.equal(patch.llm.provider, 'nvidia');
+  assert.equal(patch.llm.nvidia_key, 'new-fixture-nvidia');
+  assert.equal(patch.llm.nvidia_model, 'nvidia/test-chat');
+  assert.equal(patch.llm.openai_key, '********1234');
+  assert.equal(patch.stt.engine, 'local');
+  assert.equal(Object.hasOwn(patch.stt, 'nvidia_key'), false);
+  assert.equal($('settingsModal').classList.contains('visible'), false);
+});
+
 test('Atualizar no aviso abre a aba Atualizações sem aguardar o carregamento das configurações', async t => {
   const {w, $, api, calls} = setup(t);
   let finishSettings;

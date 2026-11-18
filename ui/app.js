@@ -472,7 +472,7 @@ function renderEnhanced(md, provider, preview = false) {
     return;
   }
   const provNames = { local_minutes: "IA local · rascunho para revisão", ollama: "IA Local (Ollama)", extractive: "sumarizador integrado (offline)",
-                      openrouter: "OpenRouter", anthropic: "Anthropic (Claude)", openai: "OpenAI (ChatGPT)", groq: "Groq" };
+                      openrouter: "OpenRouter", anthropic: "Anthropic (Claude)", openai: "OpenAI (ChatGPT)", nvidia: "NVIDIA NIM", groq: "Groq" };
   body.innerHTML = `<div class="provider-tag">Gerado com ${provNames[provider] || provider || "IA"}</div>` +
                    renderMd(md);
   if (provider === "local_minutes") {
@@ -1205,6 +1205,9 @@ async function openSettings(tab = null) {
       watchMinutesDownload(minutesModel.download_job_id, minutesModel.size).catch(() => toast("Não foi possível acompanhar o download."));
     }
     $("setLlmProvider").value = s.llm.provider;
+    $("setNvidiaKey").value = s.llm.nvidia_key || "";
+    $("setModelNvidia").value = s.llm.nvidia_model || "";
+    $("nvidiaKeyTestStatus").textContent = "";
     $("setOllamaUrl").value = s.llm.ollama_url;
     const models = await api().list_ollama_models();
     const om = $("setOllamaModel");
@@ -1233,13 +1236,33 @@ async function openSettings(tab = null) {
     $("setConsent").checked = !!s.consent.enabled;
     $("setConsentText").value = s.consent.snippet;
     if ($("updateCurrentVer")) {
-      const v = (state.settingsState && state.settingsState.version) || "1.6.4";
+      const v = (state.settingsState && state.settingsState.version) || "1.6.5";
       $("updateCurrentVer").textContent = "Versão instalada: v" + v;
     }
     renderTplManager();
   } catch (err) {
     console.error("Erro ao carregar configurações:", err);
     toast("Erro ao carregar configurações: " + (err.message || err), 4000);
+  }
+}
+
+async function testNvidiaKey() {
+  const button = $("btnTestNvidiaKey");
+  const status = $("nvidiaKeyTestStatus");
+  const keyField = $("setNvidiaKey");
+  const modelField = $("setModelNvidia");
+  const key = keyField.value.trim(), model = modelField.value.trim();
+  if (!key) { status.textContent = "Informe uma chave NVIDIA NIM para testar."; return; }
+  const unchanged = () => keyField.value.trim() === key && modelField.value.trim() === model;
+  button.disabled = true;
+  status.textContent = "Testando a conexão com um texto de exemplo…";
+  try {
+    const result = await api().test_nvidia_key(key, model);
+    if (unchanged()) status.textContent = result.ok ? "Conexão com a NVIDIA NIM confirmada." : result.error;
+  } catch {
+    if (unchanged()) status.textContent = "Não foi possível testar a conexão com a NVIDIA NIM.";
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -1296,6 +1319,8 @@ async function saveSettings() {
       anthropic_keys: llmAnthKeys,
       openai_key: llmOpenaiKeys[0] || "",
       openai_keys: llmOpenaiKeys,
+      nvidia_key: $("setNvidiaKey").value.trim(),
+      nvidia_model: $("setModelNvidia").value.trim(),
       groq_key: llmGroqKeys[0] || "",
       groq_keys: llmGroqKeys,
       anthropic_model: $("setModelAnthropic").value.trim(),
@@ -1312,7 +1337,10 @@ async function saveSettings() {
     },
     launch_at_startup: $("setStartup").checked,
   };
-  await api().save_settings(patch);
+  const saved = await api().save_settings(patch);
+  if (!saved.ok) { toast(saved.error || "Não foi possível salvar as configurações."); return; }
+  $("setNvidiaKey").value = "";
+  $("nvidiaKeyTestStatus").textContent = "";
   applyTheme(patch.ui.theme);
   $("settingsModal").classList.remove("visible");
   toast("Configurações salvas com sucesso!");
@@ -1422,7 +1450,7 @@ async function refreshStatus() {
     injectFonts(st.font_faces);
     const bits = [];
     // escapeHtml on provider/model strings: they come from user settings.
-    if (st.llm.provider) bits.push(`IA: <b>${escapeHtml(st.llm.provider)}</b> (${escapeHtml(st.llm.detail || "")})`);
+    if (st.llm.provider) bits.push(`IA: <b>${escapeHtml(st.llm.provider === "nvidia" ? "NVIDIA NIM" : st.llm.provider)}</b> (${escapeHtml(st.llm.detail || "")})`);
     else bits.push("IA: sumarizador integrado (offline)");
     if (st.stt_model.state === "loading") bits.push("Whisper: carregando modelo…");
     else if (st.stt_model.state === "error") bits.push(`Whisper: ${escapeHtml(st.stt_model.detail || "erro no modelo")}`);
@@ -1555,6 +1583,8 @@ function wireEvents() {
   });
   // settings
   const closeSettingsModal = () => {
+    $("setNvidiaKey").value = "";
+    $("nvidiaKeyTestStatus").textContent = "";
     $("settingsModal").classList.remove("visible");
     if (state.settings && state.settings.ui) applyTheme(state.settings.ui.theme || "light");
   };
@@ -1585,6 +1615,10 @@ function wireEvents() {
   $("btnAddLlmAnthropicKey")?.addEventListener("click", () => addKeyRow("keysLlmAnthropic", "sk-ant-…"));
   $("btnAddLlmOpenaiKey")?.addEventListener("click", () => addKeyRow("keysLlmOpenai", "sk-…"));
   $("btnAddLlmGroqKey")?.addEventListener("click", () => addKeyRow("keysLlmGroq", "gsk_…"));
+  $("btnTestNvidiaKey").addEventListener("click", testNvidiaKey);
+  for (const id of ["setNvidiaKey", "setModelNvidia"]) {
+    $(id).addEventListener("input", () => { $("nvidiaKeyTestStatus").textContent = ""; });
+  }
   $("btnTestOrKey")?.addEventListener("click", async () => {
     if (!isApiReady()) { toast("Aguarde a conexão com o backend...", 3000); return; }
     const st = $("orKeyTestStatus");

@@ -185,6 +185,11 @@ prepare também o motor experimental com `.\scripts\install-minutes-runtime.ps1 
   automaticamente; remova-a e o Muesli usará o Ollama e depois o resumidor integrado.
   As chaves são armazenadas apenas em `%APPDATA%\Muesli\settings.json` e enviadas
   somente ao provedor configurado.
+- **NVIDIA NIM (opcional, na nuvem)**: em **Configurações → Modelos de IA**, adicione a
+  chave no campo NVIDIA NIM e escolha um modelo de chat. Use **Testar conexão** para
+  validar com uma frase de exemplo, sem dados de reunião. Selecione explicitamente
+  **NVIDIA NIM (nuvem)** como provedor e salve. O chat e o aprimoramento normal enviam
+  o texto necessário à NVIDIA; a fila de **Atas locais** e a transcrição são independentes.
 - **Transcrição na nuvem (opcional)**: altere Configurações > Transcrição para as APIs
   Whisper da OpenAI ou Groq. Se uma chamada à nuvem falhar durante a reunião, o Muesli
   volta ao Whisper local para que a transcrição continue.

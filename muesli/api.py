@@ -612,6 +612,7 @@ tags: [reuniao/executiva]
                 keys = keypool.collect_keys(stt_out, sing, plur)
                 stt_out[sing] = keypool.mask_key(keys[0]) if keys else ""
                 stt_out[plur] = keypool.mask_keys(keys)
+        llm_out["nvidia_key"] = keypool.mask_key(llm_out.get("nvidia_key") or "")
         out = {**s, "llm": llm_out, "stt": stt_out}
         out["launch_at_startup"] = settings.get_launch_at_startup()
         return out
@@ -619,6 +620,18 @@ tags: [reuniao/executiva]
     def save_settings(self, patch):
         patch = patch or {}
         cur = settings.load()
+        llm = patch.get("llm")
+        if isinstance(llm, dict) and "nvidia_key" in llm:
+            key = llm["nvidia_key"]
+            if not isinstance(key, str):
+                return {"ok": False, "error": "A chave NVIDIA NIM precisa ser texto."}
+            key = key.strip()
+            if key.startswith("********"):
+                saved = cur["llm"].get("nvidia_key") or ""
+                if keypool.mask_key(saved) != key:
+                    return {"ok": False, "error": "A chave NVIDIA NIM mudou. Reabra as configurações."}
+                key = saved
+            llm["nvidia_key"] = key
         for section, providers in (
             ("llm", ("openrouter", "openai", "groq", "anthropic")),
             ("stt", ("openrouter", "openai", "groq")),
@@ -649,6 +662,34 @@ tags: [reuniao/executiva]
         keypool.rotator.clear()
         stt.reset_status()
         return {"ok": True, "warning": warning}
+
+    def test_nvidia_key(self, key, model):
+        if not isinstance(key, str) or not isinstance(model, str):
+            return {"ok": False, "error": "Informe uma chave e um modelo NVIDIA NIM válidos."}
+        key = key.strip()
+        if key.startswith("********"):
+            saved = settings.load()["llm"].get("nvidia_key") or ""
+            key = saved if keypool.mask_key(saved) == key else ""
+        if not key:
+            return {"ok": False, "error": "Informe uma chave NVIDIA NIM para testar."}
+        try:
+            enhance.nvidia_complete("", "Responda somente OK.", key,
+                                    model.strip() or enhance.NVIDIA_DEFAULT_MODEL, probe=True)
+        except requests.exceptions.SSLError:
+            error = "Não foi possível verificar o certificado da NVIDIA NIM."
+        except requests.HTTPError as exc:
+            code = exc.response.status_code if exc.response is not None else 0
+            hint = {400: "Confira o ID do modelo.", 401: "Confira se a chave está válida e não expirou.",
+                    403: "A chave não tem acesso a este modelo.", 404: "Confira o ID do modelo.",
+                    429: "Limite atingido; tente novamente mais tarde."}.get(code, "Tente novamente mais tarde.")
+            error = f"NVIDIA NIM retornou HTTP {code}. {hint}"
+        except requests.RequestException:
+            error = "Não foi possível conectar à NVIDIA NIM. Confira a rede e tente novamente."
+        except ValueError:
+            error = "A NVIDIA NIM não retornou texto. Confira se o modelo aceita chat."
+        else:
+            return {"ok": True}
+        return {"ok": False, "error": error}
 
     def test_openrouter_key(self, raw_keys=""):
         s = settings.load()

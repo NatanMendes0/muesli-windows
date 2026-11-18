@@ -1,7 +1,7 @@
 """Note enhancement: merge rough notes with the transcript into structured markdown.
 
-Provider order when set to auto: Anthropic, OpenAI, Groq (cloud keys win if present),
-then local Ollama, then a built-in extractive summarizer that needs nothing installed.
+Auto tries Anthropic, OpenRouter, OpenAI, Groq, then local Ollama. NVIDIA NIM
+is explicitly selected; the built-in extractive summarizer remains the fallback.
 """
 import json
 import re
@@ -16,6 +16,8 @@ REQUEST_TIMEOUT = 240
 OLLAMA_TIMEOUT = 900          # local models on CPU can be slow; do not give up on them
 CLOUD_TRANSCRIPT_CHARS = 26000
 LOCAL_TRANSCRIPT_CHARS = 11000
+NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+NVIDIA_DEFAULT_MODEL = settings.DEFAULTS["llm"]["nvidia_model"]
 
 STOPWORDS = set("""a an the and or but if then else for while of to in on at by with from as is are was
 were be been being am do does did doing have has had having i you he she it we they me him her us them
@@ -103,6 +105,29 @@ def _call_openai_style(system: str, user: str, url: str, key: str, model: str, e
     return _strip_think(r.json()["choices"][0]["message"]["content"])
 
 
+def nvidia_complete(system: str, user: str, key: str, model: str, *, probe=False) -> str:
+    messages = [{"role": "system", "content": system}] if system else []
+    messages.append({"role": "user", "content": user})
+    # Unlike legacy providers, never retry without TLS verification or follow a redirect.
+    response = requests.post(
+        NVIDIA_CHAT_URL, timeout=(10, 45 if probe else REQUEST_TIMEOUT),
+        headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
+        json={"model": model, "messages": messages, "temperature": 0.3,
+              "max_tokens": 512 if probe else 4096, "stream": False},
+        verify=True, allow_redirects=False,
+    )
+    if response.status_code != 200:
+        raise requests.HTTPError(f"NVIDIA NIM: HTTP {response.status_code}", response=response)
+    try:
+        text = response.json()["choices"][0]["message"]["content"]
+        visible = _strip_think(text) if isinstance(text, str) else ""
+    except (ValueError, TypeError, IndexError, KeyError):
+        visible = ""
+    if not visible:
+        raise ValueError("A NVIDIA NIM não retornou texto.")
+    return visible
+
+
 def _call_anthropic(system: str, user: str, key: str, model: str) -> str:
     r = _post_with_ssl_fallback(
         "https://api.anthropic.com/v1/messages", timeout=REQUEST_TIMEOUT,
@@ -175,6 +200,9 @@ def _llm_available_uncached(cfg: dict) -> dict:
         if name == "openai" and (keypool.collect_keys(cfg, "openai_key", "openai_keys") or cfg.get("openai_url")):
             out.update(provider="openai", detail=cfg.get("openai_model", ""))
             return out
+        if name == "nvidia" and cfg.get("nvidia_key"):
+            out.update(provider="nvidia", detail=cfg.get("nvidia_model") or NVIDIA_DEFAULT_MODEL)
+            return out
         if name == "groq" and keypool.collect_keys(cfg, "groq_key", "groq_keys"):
             out.update(provider="groq", detail=cfg.get("groq_model", ""))
             return out
@@ -188,7 +216,7 @@ def _llm_available_uncached(cfg: dict) -> dict:
 
 
 def _provider_order(cfg: dict, provider: str):
-    if provider in ("anthropic", "openrouter", "openai", "groq", "ollama"):
+    if provider in ("anthropic", "openrouter", "openai", "nvidia", "groq", "ollama"):
         return [provider]
     if provider == "none":
         return []
@@ -232,6 +260,11 @@ def llm_complete(system: str, user: str):
                     return _call_with_rotation(
                         "llm:openai", keys or ["dummy-key"],
                         lambda k: _call_openai_style(system, user, url, k, model)), "openai"
+            if name == "nvidia":
+                key = cfg.get("nvidia_key")
+                if key:
+                    model = cfg.get("nvidia_model") or NVIDIA_DEFAULT_MODEL
+                    return nvidia_complete(system, user, key, model), "nvidia"
             if name == "groq":
                 keys = keypool.collect_keys(cfg, "groq_key", "groq_keys")
                 if keys:

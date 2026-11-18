@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>Muesli v1.6.4</title>
+<title>Muesli v1.6.5</title>
 <script>
 (function(){try{var t=localStorage.getItem("muesli_theme")||"light";if(t==="auto"){t=(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";}document.documentElement.dataset.theme=t;}catch(e){}})();
 </script>
@@ -23,7 +23,7 @@
         <path d="M13.5 7.5 c0 -1.2 1 -1.2 1 -2.4"/>
       </svg>
       <span class="name">Muesli</span>
-      <span class="ver-badge">v1.6.4</span>
+      <span class="ver-badge">v1.6.5</span>
     </div>
 
     <button class="btn-new" id="btnNew"><span class="dot"></span><span id="btnNewLabel">Nova reunião</span></button>
@@ -400,6 +400,7 @@
             <option value="openrouter">OpenRouter (Vários modelos com 1 chave)</option>
             <option value="anthropic">Anthropic (Claude)</option>
             <option value="openai">OpenAI (ChatGPT)</option>
+            <option value="nvidia">NVIDIA NIM (nuvem)</option>
             <option value="groq">Groq</option>
             <option value="none">Apenas sumarizador integrado (sem IA generativa)</option>
           </select>
@@ -461,6 +462,22 @@
         <div class="ai-prov-card">
           <div class="two-col" style="align-items:start;">
             <div class="field" style="margin-bottom:0;">
+              <label for="setNvidiaKey">Chave de API NVIDIA NIM</label>
+              <input type="password" id="setNvidiaKey" autocomplete="off" placeholder="nvapi-…">
+              <div class="key-actions"><button type="button" class="btn-mini" id="btnTestNvidiaKey">Testar conexão</button></div>
+            </div>
+            <div class="field" style="margin-bottom:0;">
+              <label for="setModelNvidia">Modelo NVIDIA NIM</label>
+              <input type="text" id="setModelNvidia" placeholder="nvidia/nemotron-3.5-lightning-30b-a3b" spellcheck="false">
+            </div>
+          </div>
+          <div class="hint">Para usar, selecione NVIDIA NIM acima. O chat e o aprimoramento podem enviar texto da reunião à NVIDIA; o teste envia apenas uma frase de exemplo. A transcrição e as Atas locais não mudam.</div>
+          <div class="hint" id="nvidiaKeyTestStatus" role="status"></div>
+        </div>
+
+        <div class="ai-prov-card">
+          <div class="two-col" style="align-items:start;">
+            <div class="field" style="margin-bottom:0;">
               <label>Chaves de API Groq</label>
               <div class="key-list" id="keysLlmGroq"></div>
               <div class="key-actions"><button type="button" class="btn-mini" id="btnAddLlmGroqKey">+ Adicionar chave</button></div>
@@ -497,7 +514,7 @@
         <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
           <div>
             <div style="font-size:14px; font-weight:700; color:var(--ink);">Muesli para Windows</div>
-            <div style="font-size:12.5px; color:var(--muted);" id="updateCurrentVer">Versão instalada: v1.6.4</div>
+            <div style="font-size:12.5px; color:var(--muted);" id="updateCurrentVer">Versão instalada: v1.6.5</div>
           </div>
           <span style="flex:1"></span>
           <button class="btn-plain" id="btnCheckUpdatesNow" style="padding:8px 16px; font-weight:600;">

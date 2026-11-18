@@ -45,7 +45,7 @@ DEFAULTS = {
     },
     "minutes": {"enabled": False, "ac_only": False, "prefer_vulkan": False, "profile": "executiva"},
     "llm": {
-        "provider": "auto",         # auto | ollama | openrouter | openai | groq | anthropic | none
+        "provider": "auto",         # auto | ollama | openrouter | openai | groq | anthropic | nvidia | none
         "ollama_url": "http://localhost:11434",
         "ollama_model": "",         # empty = first installed model
         "openrouter_key": "",
@@ -55,6 +55,8 @@ DEFAULTS = {
         "openai_keys": [],
         "openai_url": "",           # custom base URL or empty for api.openai.com
         "openai_model": "gpt-4o-mini",
+        "nvidia_key": "",
+        "nvidia_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
         "groq_key": "",
         "groq_keys": [],
         "groq_model": "qwen/qwen3.8-27b",

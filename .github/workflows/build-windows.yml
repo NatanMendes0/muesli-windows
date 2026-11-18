@@ -134,9 +134,9 @@ jobs:
           make_latest: true
           generate_release_notes: true
           body: |
-            - Limpar fila, na Fila de atas locais, cancela a geração em andamento e descarta o progresso, as prévias e os arquivos temporários. Não exclui reuniões, gravações, transcrições, anotações, atas salvas nem o modelo de IA.
-            - O botão Atualizar do aviso abre diretamente Configurações → Atualizações, sem passar pela aba Áudio.
-            - Na v1.6.3, use Configurações → Atualizações para baixar e, depois, escolha Instalar e reiniciar. Na v1.6.2 ou anterior, baixe `${{ env.MUESLI_DIST_NAME }}.zip`, extraia a pasta inteira e abra `${{ env.MUESLI_DIST_NAME }}.exe`.
+            - NVIDIA NIM em Configurações → Modelos de IA: chave separada da OpenAI, modelo configurável e botão Testar conexão que envia apenas uma frase de exemplo.
+            - Selecione NVIDIA NIM (nuvem) explicitamente para usar o provedor no chat e no aprimoramento normal. Essas ações podem enviar texto à NVIDIA; a transcrição e a fila de Atas locais não mudam.
+            - A partir da v1.6.3, use Configurações → Atualizações para baixar e depois escolha Instalar e reiniciar. Na v1.6.2 ou anterior, baixe `${{ env.MUESLI_DIST_NAME }}.zip`, extraia a pasta inteira e abra `${{ env.MUESLI_DIST_NAME }}.exe`.
             - `Muesli-windows-x64.zip` contém o mesmo pacote e mantém a compatibilidade com atualizadores antigos.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
