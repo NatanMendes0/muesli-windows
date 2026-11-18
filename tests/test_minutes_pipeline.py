@@ -175,6 +175,135 @@ def test_local_minutes_publish_title_with_the_summary(database, monkeypatch, mod
         assert generated == ['O grupo validou a homologação do portal.']
 
 
+def test_clear_queue_discards_progress_and_prompt_files_without_deleting_meetings(database, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, 'data_dir', lambda: str(tmp_path))
+    audio = tmp_path / 'recording.wav'
+    audio.write_bytes(b'audio')
+    model = local_minutes.model_path()
+    model.write_bytes(b'model')
+    orphan = tmp_path / 'minutes-abcd1234'
+    orphan.mkdir()
+    (orphan / 'prompt.txt').write_text('rascunho temporário', encoding='utf-8')
+    unrelated = tmp_path / 'minutes-keep1234'
+    unrelated.mkdir()
+    (unrelated / 'notes.txt').write_text('preservar', encoding='utf-8')
+
+    jobs = {}
+    for state in ('queued', 'paused', 'partial', 'error', 'conflict', 'done'):
+        mid = db.create_meeting(state, 'auto')
+        db.end_meeting(mid, 60, str(audio))
+        db.update_meeting(mid, notes_md='anotações', summary_md='ata salva')
+        db.add_segment(mid, 0, 3, 'Them', 'transcrição original')
+        job = db.enqueue_minutes(mid, 'executiva', 'estratégia')
+        assert job
+        jid = job['id']
+        db.set_minutes_state(jid, 'running')
+        assert db.save_minutes_block(jid, 0, 'done', {'resumo': 'progresso'}, 0, 3)
+        db.set_minutes_state(jid, state)
+        jobs[state] = mid, jid
+
+    response = api.Api().clear_minutes_queue()
+    assert response['ok'] and not response.get('warning')
+    assert response['removed_files'] == 1
+    assert set(response['removed_ids']) == {jid for state, (_, jid) in jobs.items() if state != 'done'}
+    assert not orphan.exists()
+    assert unrelated.is_dir() and audio.is_file() and model.is_file()
+    db.conn().close()
+    db._local.conn = None
+    db.recover_minutes_jobs()
+    assert db.list_minutes_jobs() == []
+    for state, (mid, jid) in jobs.items():
+        meeting = db.get_meeting(mid)
+        assert meeting and meeting['summary_md'] == 'ata salva' and meeting['notes_md'] == 'anotações'
+        assert db.get_segments(mid)[0]['text'] == 'transcrição original'
+        assert bool(db.load_minutes_blocks(jid)) == (state == 'done')
+    mid, jid = jobs['partial']
+    retry = db.enqueue_minutes(mid, 'executiva', 'estratégia')
+    assert retry and retry['id'] != jid
+
+
+def test_clear_queue_does_not_follow_linked_prompt_paths(database, tmp_path, monkeypatch):
+    data = tmp_path / 'Muesli'
+    data.mkdir()
+    monkeypatch.setattr(settings, 'data_dir', lambda: str(data))
+    protected = tmp_path / 'original'
+    protected.mkdir()
+    original = protected / 'prompt.txt'
+    original.write_text('arquivo fora da fila', encoding='utf-8')
+    linked_dir = data / 'minutes-linked01'
+    real_dir = data / 'minutes-linked02'
+    real_dir.mkdir()
+    linked_file = real_dir / 'prompt.txt'
+    try:
+        linked_dir.symlink_to(protected, target_is_directory=True)
+        linked_file.symlink_to(original)
+    except OSError as exc:
+        if sys.platform == 'win32' and getattr(exc, 'winerror', None) == 1314:
+            pytest.skip('Creating symlinks requires Windows Developer Mode or elevated privileges')
+        raise
+
+    response = api.Api().clear_minutes_queue()
+    assert response['ok'] and response['removed_files'] == 0
+    assert linked_dir.is_symlink() and linked_file.is_symlink()
+    assert original.read_text(encoding='utf-8') == 'arquivo fora da fila'
+
+
+def test_clear_queue_reports_a_locked_prompt_and_allows_retry(database, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, 'data_dir', lambda: str(tmp_path))
+    folder = tmp_path / 'minutes-testlock'
+    folder.mkdir()
+    prompt = folder / 'prompt.txt'
+    prompt.write_text('conteúdo temporário', encoding='utf-8')
+    unlink = type(prompt).unlink
+
+    def deny_prompt(path, *args, **kwargs):
+        if path == prompt:
+            raise PermissionError('simulated file lock')
+        return unlink(path, *args, **kwargs)
+
+    backend = api.Api()
+    with monkeypatch.context() as patcher:
+        patcher.setattr(type(prompt), 'unlink', deny_prompt)
+        response = backend.clear_minutes_queue()
+        assert response['ok'] and response['warning'] and prompt.exists()
+    response = backend.clear_minutes_queue()
+    assert response['ok'] and response['removed_files'] == 1 and not prompt.exists()
+
+
+def test_clear_queue_cancels_active_worker_before_cleaning_prompt_files(database, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, 'data_dir', lambda: str(tmp_path))
+    monkeypatch.setattr(settings, 'load', lambda: {'minutes': {'enabled': True}})
+    monkeypatch.setattr(local_minutes, 'runtime_path', lambda: tmp_path / 'llama-completion')
+    monkeypatch.setattr(local_minutes, 'model_installed', lambda: True)
+    started = threading.Event()
+    stopped = threading.Event()
+
+    def complete(command, cwd, flags, env, cancel):
+        started.set()
+        assert cancel.wait(5)
+        stopped.set()
+        raise local_minutes.GenerationCancelled()
+
+    monkeypatch.setattr(local_minutes, '_complete_process', complete)
+    mid = db.create_meeting('Reunião', 'auto')
+    db.end_meeting(mid, 30)
+    db.add_segment(mid, 0, 4, 'Them', 'Dados para a ata local.')
+    backend = api.Api()
+    try:
+        job = backend.enhance_meeting(mid, 'auto')
+        assert started.wait(5)
+        assert list(tmp_path.glob('minutes-*/prompt.txt'))
+        response = backend.clear_minutes_queue()
+        assert response['ok'] and not response.get('warning') and response['removed_ids'] == [job['job_id']]
+        assert stopped.is_set()
+        assert not list(tmp_path.glob('minutes-*/prompt.txt'))
+        assert backend.job_status(job['job_id'])['state'] == 'unknown'
+        meeting = db.get_meeting(mid)
+        assert meeting and meeting['summary_md'] == ''
+    finally:
+        backend._close_minutes()
+
+
 def test_checkpoint_survives_reopen_and_protects_summary(database):
     mid = db.create_meeting('Reunião', 'auto')
     db.end_meeting(mid, 240)

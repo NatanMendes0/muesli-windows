@@ -125,6 +125,80 @@ test('o menu pelo teclado protege uma gravação ativa', async t => {
   assert.deepEqual(calls, []);
 });
 
+test('Limpar fila pede confirmação, descarta a prévia e preserva a ata salva', async t => {
+  const {w, $, api, calls} = setup(t);
+  const getMeeting = api.get_meeting;
+  api.get_meeting = async id => ({...(await getMeeting(id)), summary_md: 'Ata já salva', summary_provider: 'local_minutes'});
+  api.list_minutes_jobs = async () => [{id: 'minutes-20', meeting_id: 20, state: 'partial', title: 'Reunião revisada',
+    profile: 'treinamento', completed: 1, total: 2, failed: 1, detail: 'Parcial'}];
+  api.get_minutes_preview = async () => ({ok: true, summary_md: 'Prévia descartável'});
+  api.job_status = async () => ({state: 'unknown'});
+  api.clear_minutes_queue = async () => {
+    calls.push(['clear']);
+    api.list_minutes_jobs = async () => [];
+    return {ok: true, removed_ids: ['minutes-20']};
+  };
+
+  await w.ui.openMeeting(20);
+  $('btnEnhance').click();
+  await tick();
+  const preview = [...$('minutesQueueRows').querySelectorAll('button')].find(b => b.textContent === 'Ver parcial');
+  preview.click();
+  await tick();
+  assert.match($('enhancedBody').textContent, /Prévia descartável/);
+  const clear = $('btnClearMinutesQueue');
+  assert.ok(clear);
+  w.confirm = message => { assert.match(message, /temporários/); return false; };
+  clear.click();
+  assert.deepEqual(calls.map(call => call[0]), ['enhance']);
+  w.confirm = () => true;
+  clear.click();
+  await tick();
+  assert.deepEqual(calls.map(call => call[0]), ['enhance', 'clear']);
+  assert.equal($('minutesQueueCount').textContent, '0');
+  assert.equal($('minutesQueueRows').children.length, 0);
+  assert.match($('enhancedBody').textContent, /Ata já salva/);
+  assert.doesNotMatch($('enhancedBody').textContent, /Prévia descartável/);
+});
+
+test('Atualizar no aviso abre a aba Atualizações sem aguardar o carregamento das configurações', async t => {
+  const {w, $, api, calls} = setup(t);
+  let finishSettings;
+  api.get_settings = () => new Promise(resolve => { finishSettings = resolve; });
+  api.list_audio_devices = async () => ({ok: true, mics: [], loopbacks: []});
+  api.local_minutes_status = async () => ({});
+  api.list_ollama_models = async () => [];
+  api.check_updates = async () => ({ok: true, current_version: '1.6.3', latest_version: 'v1.6.4',
+    can_install: true, has_update: true});
+  const activeTab = () => w.document.querySelector('#settingsModal .modal-tabs .tab.active').dataset.set;
+  const visibleSections = () => [...w.document.querySelectorAll('#settingsModal .set-section.visible')]
+    .map(section => section.dataset.set);
+
+  $('btnSettings').click();
+  assert.equal(activeTab(), 'audio');
+  assert.deepEqual(visibleSections(), ['audio']);
+  finishSettings({audio: {}, stt: {}, llm: {}, consent: {}});
+  await tick();
+  $('btnCloseSettings').click();
+
+  await w.ui.checkUpdatesUi(false);
+  assert.equal($('updateCornerBanner').style.display, 'flex');
+  $('btnUcOpen').click();
+  assert.equal($('settingsModal').classList.contains('visible'), true);
+  assert.equal(activeTab(), 'updates');
+  assert.deepEqual(visibleSections(), ['updates']);
+  assert.equal($('updateCornerBanner').style.display, 'none');
+  assert.match($('updateTitle').textContent, /v1\.6\.4/);
+  assert.equal($('btnDownloadUpdate').disabled, false);
+  assert.deepEqual(calls, []);
+
+  w.document.querySelector('#settingsModal .modal-tabs [data-set="audio"]').click();
+  finishSettings({audio: {}, stt: {}, llm: {}, consent: {}});
+  await tick();
+  assert.equal(activeTab(), 'audio');
+  assert.deepEqual(visibleSections(), ['audio']);
+});
+
 test('baixar atualização não reinicia; só instala depois de confirmar e salvar notas', async t => {
   const {w, $, api, calls} = setup(t);
   await w.ui.openMeeting(10);

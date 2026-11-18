@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -177,6 +178,37 @@ def _process_flags():
 
 def _process_env():
     return {k: v for k, v in os.environ.items() if not k.upper().startswith('LLAMA_ARG_')}
+
+
+def clear_temporary_prompts():
+    """Remove only leftover prompt files created by run_completion with the worker idle."""
+    removed = 0
+    failed = False
+    for folder in Path(settings.data_dir()).iterdir():
+        if not re.fullmatch(r'minutes-[a-z0-9_]{8}', folder.name):
+            continue
+        try:
+            info = folder.lstat()
+            if (not stat.S_ISDIR(info.st_mode) or
+                    getattr(info, 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+                continue
+            source = folder / 'prompt.txt'
+            if list(folder.iterdir()) != [source]:
+                continue
+            info = source.lstat()
+            if (not stat.S_ISREG(info.st_mode) or
+                    getattr(info, 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+                continue
+            source.unlink()
+            removed += 1
+            folder.rmdir()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            failed = True
+    if failed:
+        raise OSError('Local minutes prompt cleanup incomplete')
+    return removed
 
 
 def run_completion(executable, model, instructions, evidence, tokens, on_ac, schema=None, cancel=None, device=None):

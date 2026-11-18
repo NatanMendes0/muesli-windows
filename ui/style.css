@@ -17,6 +17,8 @@
 .minutes-queue { margin: 4px 10px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; }
 .minutes-queue summary { cursor: pointer; font-size: 12px; }
 #minutesQueueRows { max-height: 160px; overflow-y: auto; }
+.minutes-queue-empty { margin: 6px 0; font-size: 12px; color: var(--muted); }
+.minutes-queue-clear { margin-top: 4px; }
 .minutes-job { margin: 6px 0; padding: 6px 0; border-top: 1px solid var(--border); font-size: 12px; }
 .minutes-job p { margin: 4px 0; }
 .minutes-job progress { width: 100%; }

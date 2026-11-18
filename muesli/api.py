@@ -4,6 +4,7 @@ Slow operations (enhance, chat) run as background jobs the UI polls with job_sta
 """
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -38,6 +39,7 @@ class Api:
         self._minutes_worker = None
         self._minutes_wake = threading.Event()
         self._minutes_running_id = None
+        self._minutes_clearing = False
         self._minutes_download_job = None
         self._update_root = updater.install_root()
         self._update_job: tuple[str, str] | None = None
@@ -296,6 +298,32 @@ class Api:
                 if job['state'] == 'queued':
                     job['detail'] = reason or 'Na fila de atas locais…'
         return jobs
+
+    def clear_minutes_queue(self):
+        with self._start_lock:
+            if self._minutes_clearing:
+                return {'ok': False, 'error': 'A limpeza da fila já está em andamento.'}
+            try:
+                removed = db.clear_minutes_queue()
+            except sqlite3.Error:
+                return {'ok': False, 'error': 'Não foi possível limpar a fila. Tente novamente.'}
+            # No new job may open a prompt while temporary files are being cleaned.
+            self._minutes_clearing = True
+            self._minutes_cancel.set()
+        try:
+            result = {'ok': True, 'removed_ids': removed}
+            if not self._minutes_idle.wait(timeout=3):
+                result['warning'] = 'Fila limpa. O motor ainda está encerrando; tente novamente para remover os temporários restantes.'
+            else:
+                try:
+                    result['removed_files'] = local_minutes.clear_temporary_prompts()
+                except OSError:
+                    result['warning'] = 'Fila limpa, mas não foi possível remover todos os arquivos temporários. Tente novamente.'
+            return result
+        finally:
+            with self._start_lock:
+                self._minutes_clearing = False
+                self._minutes_wake.set()
 
     def set_minutes_paused(self, meeting_id, paused):
         with self._start_lock:

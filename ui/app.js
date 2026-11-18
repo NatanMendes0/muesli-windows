@@ -465,6 +465,7 @@ async function selectTab(which) {
 
 function renderEnhanced(md, provider, preview = false) {
   const body = $("enhancedBody");
+  body.classList.toggle("minutes-preview", preview);
   if (!md) {
     body.innerHTML = `<div class="enhance-empty">Nenhum resumo gerado ainda.<br>
       Após a reunião, clique em <b>Aprimorar com IA</b> ou use a aba <b>Prompt Copilot</b>.</div>`;
@@ -734,7 +735,8 @@ function waitJob(jobId, onProgress) {
 let minutesJobs = new Map();
 const watchedMinutes = new Map();
 let minutesPreview;
-let minutesQueuePolling = false;
+let minutesQueuePoll;
+let minutesCleanupWarning = false;
 
 function watchMinutesJob(mid, id) {
   watchedMinutes.set(mid, id);
@@ -750,9 +752,11 @@ function syncMinutesControls(meeting, chooseFormat = true) {
   if ($("minutesStatus").textContent !== label) $("minutesStatus").textContent = label;
 }
 
-async function refreshMinutesQueue() {
-  if (minutesQueuePolling) return;
-  minutesQueuePolling = true;
+function refreshMinutesQueue() {
+  return minutesQueuePoll ??= loadMinutesQueue().finally(() => { minutesQueuePoll = null; });
+}
+
+async function loadMinutesQueue() {
   try {
     const rows = await api().list_minutes_jobs();
     const next = new Map(rows.map(job => [job.meeting_id, job]));
@@ -770,8 +774,9 @@ async function refreshMinutesQueue() {
       }
     }
     syncMinutesControls(state.current, false);
-    $("minutesQueue").hidden = !rows.length;
+    $("minutesQueue").hidden = !(rows.length || state.settings?.minutes?.enabled || minutesCleanupWarning);
     $("minutesQueueCount").textContent = String(rows.length);
+    $("minutesQueueEmpty").hidden = !!rows.length;
     const container = $("minutesQueueRows");
     const existing = new Map([...container.children].map(row => [row.dataset.job, row]));
     for (const job of rows) {
@@ -848,8 +853,35 @@ async function refreshMinutesQueue() {
     for (const row of existing.values()) row.remove();
   } catch (err) {
     console.warn("Fila local indisponível", err);
+  }
+}
+
+async function clearMinutesQueue() {
+  const button = $("btnClearMinutesQueue");
+  if (button.disabled || !confirm("Limpar a fila de atas locais? A geração em andamento será interrompida e o progresso, as prévias e os arquivos temporários serão descartados. Reuniões, áudios, transcrições, anotações, atas salvas e modelos serão preservados.")) return;
+  button.disabled = true;
+  button.textContent = "Limpando…";
+  try {
+    const result = await api().clear_minutes_queue();
+    if (!result.ok) { toast(result.error, 5000); return; }
+    const removed = new Set(result.removed_ids);
+    if (removed.has(minutesPreview?.id)) {
+      const mid = minutesPreview.mid;
+      minutesPreview = null;
+      if (state.current?.id === mid && !state.minutesEdits.has(mid) && $("enhancedBody").classList.contains("minutes-preview")) {
+        renderEnhanced(state.current.summary_md, state.current.summary_provider);
+      }
+    }
+    minutesCleanupWarning = !!result.warning;
+    // Wait for any pre-clear snapshot, then fetch the actual current queue.
+    if (minutesQueuePoll) await minutesQueuePoll;
+    await refreshMinutesQueue();
+    toast(result.warning || "Fila de atas locais limpa.", result.warning ? 6000 : 2600);
+  } catch {
+    toast("Não foi possível limpar a fila de atas locais.", 5000);
   } finally {
-    minutesQueuePolling = false;
+    button.disabled = false;
+    button.textContent = "Limpar fila";
   }
 }
 
@@ -1099,11 +1131,20 @@ function readKeyList(containerId) {
   return [...box.querySelectorAll(".key-row input")].map(i => i.value.trim()).filter(Boolean);
 }
 
-async function openSettings() {
+function selectSettingsTab(tab) {
+  const modal = $("settingsModal");
+  modal.querySelectorAll(".modal-tabs .tab").forEach(button =>
+    button.classList.toggle("active", button.dataset.set === tab));
+  modal.querySelectorAll(".set-section").forEach(section =>
+    section.classList.toggle("visible", section.dataset.set === tab));
+}
+
+async function openSettings(tab = null) {
   if (!isApiReady()) {
     toast("Aguardando inicialização do backend para abrir configurações...", 3500);
     return;
   }
+  if (tab) selectSettingsTab(tab);
   $("settingsModal").classList.add("visible");
   toast("Carregando configurações...", 1200);
   try {
@@ -1192,7 +1233,7 @@ async function openSettings() {
     $("setConsent").checked = !!s.consent.enabled;
     $("setConsentText").value = s.consent.snippet;
     if ($("updateCurrentVer")) {
-      const v = (state.settingsState && state.settingsState.version) || "1.6.3";
+      const v = (state.settingsState && state.settingsState.version) || "1.6.4";
       $("updateCurrentVer").textContent = "Versão instalada: v" + v;
     }
     renderTplManager();
@@ -1408,6 +1449,7 @@ function wireEvents() {
   wireMeetingMenu();
   $("btnStop").addEventListener("click", stopRecording);
   $("btnEnhance").addEventListener("click", enhanceNow);
+  $("btnClearMinutesQueue").addEventListener("click", clearMinutesQueue);
   $("btnDownloadMinutes").addEventListener("click", downloadMinutesModel);
   $("enhancedBody").addEventListener("click", event => {
     const source = event.target.closest("button[data-segment]");
@@ -1516,7 +1558,7 @@ function wireEvents() {
     $("settingsModal").classList.remove("visible");
     if (state.settings && state.settings.ui) applyTheme(state.settings.ui.theme || "light");
   };
-  $("btnSettings").addEventListener("click", openSettings);
+  $("btnSettings").addEventListener("click", () => openSettings());
   $("btnCloseSettings").addEventListener("click", closeSettingsModal);
   $("btnCancelSettings").addEventListener("click", closeSettingsModal);
   $("setTheme")?.addEventListener("change", () => applyTheme($("setTheme").value));
@@ -1533,7 +1575,7 @@ function wireEvents() {
     toast(next === "dark" ? "Tema escuro ativado" : "Tema claro ativado", 1800);
   });
   $("btnSaveSettings").addEventListener("click", saveSettings);
-  $("btnRefreshDevices").addEventListener("click", openSettings);
+  $("btnRefreshDevices").addEventListener("click", () => openSettings());
   $("setSttEngine")?.addEventListener("change", syncSttUi);
   $("setSttOpenrouterModel")?.addEventListener("change", syncSttUi);
   $("btnAddSttOrKey")?.addEventListener("click", () => addKeyRow("keysSttOpenrouter", "sk-or-v1-…"));
@@ -1623,25 +1665,17 @@ function wireEvents() {
     await api().copy_text($("setConsentText").value);
     toast("Texto copiado para a área de transferência!");
   });
-  document.querySelectorAll(".modal-tabs .tab").forEach(t => t.addEventListener("click", () => {
-    document.querySelectorAll(".modal-tabs .tab").forEach(x => x.classList.remove("active"));
-    t.classList.add("active");
-    document.querySelectorAll(".set-section").forEach(s =>
-      s.classList.toggle("visible", s.dataset.set === t.dataset.set));
-  }));
+  $("settingsModal").querySelectorAll(".modal-tabs .tab").forEach(tab =>
+    tab.addEventListener("click", () => selectSettingsTab(tab.dataset.set)));
   $("btnNewTemplate").addEventListener("click", () => openTplEditor(null));
   $("btnAddSection").addEventListener("click", () => addSectionRow("", ""));
   $("btnCancelTpl").addEventListener("click", () => $("tplEditor").style.display = "none");
   $("btnSaveTpl").addEventListener("click", saveTpl);
   $("btnCheckUpdatesNow")?.addEventListener("click", () => checkUpdatesUi(true));
   $("btnDownloadUpdate")?.addEventListener("click", startDownloadUpdate);
-  $("btnUcOpen")?.addEventListener("click", async () => {
-    await openSettings();
-    document.querySelectorAll(".modal-tabs .tab").forEach(x =>
-      x.classList.toggle("active", x.dataset.set === "updates"));
-    document.querySelectorAll(".set-section").forEach(s =>
-      s.classList.toggle("visible", s.dataset.set === "updates"));
-    if ($("updateCornerBanner")) $("updateCornerBanner").style.display = "none";
+  $("btnUcOpen")?.addEventListener("click", () => {
+    openSettings("updates");
+    if ($("settingsModal").classList.contains("visible")) $("updateCornerBanner").style.display = "none";
   });
   $("btnUcDismiss")?.addEventListener("click", () => {
     if ($("updateCornerBanner")) $("updateCornerBanner").style.display = "none";

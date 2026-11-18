@@ -38,7 +38,7 @@ def run(api, recover=False):
                 api._minutes_wake.clear()
                 cfg = settings.load().get('minutes', {})
                 with api._start_lock:
-                    job = db.next_minutes_job()
+                    job = None if api._minutes_clearing else db.next_minutes_job()
                     if (job and not api._closing.is_set() and not blocker(api, cfg)
                             and db.set_minutes_state(job['id'], 'running', 'Preparando transcrição…', expected='queued')):
                         retry_job = api._minutes_running_id = job['id']

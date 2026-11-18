@@ -245,6 +245,15 @@ def list_minutes_jobs():
     return [dict(row) for row in rows]
 
 
+def clear_minutes_queue():
+    # The foreign key cascades to checkpoints, never to the source meeting.
+    with conn() as c:
+        c.execute('BEGIN IMMEDIATE')
+        ids = [row['id'] for row in c.execute("SELECT id FROM minutes_jobs WHERE state!='done'")]
+        c.execute("DELETE FROM minutes_jobs WHERE state!='done'")
+        return ids
+
+
 def next_minutes_job():
     row = conn().execute("SELECT * FROM minutes_jobs WHERE state='queued' ORDER BY created_at LIMIT 1").fetchone()
     return dict(row) if row else None
