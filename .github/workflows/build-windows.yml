@@ -28,10 +28,14 @@ jobs:
 
       - name: Run portable application tests
         run: |
-          python -m pytest tests/test_local_minutes.py tests/test_categories.py tests/test_privacy_settings.py -q
+          $env:APPDATA = Join-Path $env:RUNNER_TEMP 'muesli-portable-tests'
+          python -m pytest tests/test_local_minutes.py tests/test_minutes_pipeline.py tests/test_categories.py tests/test_privacy_settings.py -q
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:APPDATA = Join-Path $env:RUNNER_TEMP 'muesli-chat-test'
           python tests/test_chat.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check ui/app.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build with PyInstaller
         run: |
@@ -77,9 +81,11 @@ jobs:
           make_latest: true
           generate_release_notes: true
           body: |
-            - Atas executivas offline com download opcional do Qwen2.5 1.5B (1,12 GB).
+            - Atas offline com Qwen3 4B Instruct (2,50 GB): ata executiva ou treinamento/palestra.
+            - Fila retomável por blocos, prévia parcial e referências à transcrição.
             - CPU por padrão. Aceleração experimental em Intel UHD/Iris via Vulkan, com fallback para CPU.
             - Para testar: Configurações → IA → Atas locais → Tentar GPU integrada Intel.
-            - A notificação da ata informa o motor da etapa final e o tempo total de geração.
+            - O download do modelo é separado do ZIP. Para transcrever sem rede, use também o Whisper local.
+            - Sessões de até seis horas foram exercitadas com transcrições sintéticas e respostas simuladas. O desempenho em gravações reais depende do equipamento.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

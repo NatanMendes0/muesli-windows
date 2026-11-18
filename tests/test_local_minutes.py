@@ -12,8 +12,8 @@ import pytest
 from muesli import api, db, local_minutes, settings
 
 
-def draft_json(summary, actions=()):
-    return json.dumps(dict(participantes='', citados='', resumo=summary, deliberacoes=[], acoes=list(actions)))
+def draft_json(summary):
+    return json.dumps(dict(resumo=summary, fatos=[]))
 
 
 def test_download_rejects_corruption_without_installing(tmp_path, monkeypatch):
@@ -33,24 +33,6 @@ def test_download_rejects_corruption_without_installing(tmp_path, monkeypatch):
     assert not list(tmp_path.iterdir())
 
 
-def test_long_transcript_maps_both_ends_and_consolidates():
-    source = 'INÍCIO\n' + ('Fala com acentuação.\n' * 2000) + 'ÚLTIMA DECISÃO'
-    calls = []
-
-    def generate(instructions, evidence, tokens, schema=None):
-        calls.append(evidence)
-        text = 'Decisão: primeira e última.'
-        return draft_json(text) if schema else text
-
-    draft = local_minutes.summarize({'title': 'Projeto', 'duration_sec': 600, 'created_at': 0}, source, generate)
-    assert len(calls) > 2
-    assert 'INÍCIO' in calls[0]
-    assert any('ÚLTIMA DECISÃO' in text for text in calls)
-    assert 'Decisão: primeira e última.' in calls[-1]
-    assert '# Ata Executiva: Projeto' in draft
-    assert all(len(text.encode('utf-8')) <= local_minutes.INPUT_BYTES for text in calls)
-
-
 def test_auto_minutes_wait_for_whisper_and_use_final_text(monkeypatch, tmp_path):
     monkeypatch.setattr(db, 'DB_PATH', str(tmp_path / 'test.sqlite'))
     monkeypatch.setattr(db._local, 'conn', None, raising=False)
@@ -59,8 +41,11 @@ def test_auto_minutes_wait_for_whisper_and_use_final_text(monkeypatch, tmp_path)
     mid = db.create_meeting('Projeto', 'auto')
     drained = threading.Event()
     inserted = threading.Event()
+    finalizing = threading.Event()
     ac = threading.Event()
     monkeypatch.setattr(local_minutes, 'power_connected', ac.is_set)
+    monkeypatch.setattr(local_minutes, 'runtime_path', lambda: tmp_path / 'fake.exe')
+    monkeypatch.setattr(local_minutes, 'model_installed', lambda: True)
     backend = api.Api()
 
     class Capture:
@@ -73,6 +58,7 @@ def test_auto_minutes_wait_for_whisper_and_use_final_text(monkeypatch, tmp_path)
             return 50
 
         def wait_for_transcription(self):
+            finalizing.set()
             drained.wait(5)
             db.add_segment(mid, 1, 2, 'Eu', 'Última decisão')
             inserted.set()
@@ -81,14 +67,24 @@ def test_auto_minutes_wait_for_whisper_and_use_final_text(monkeypatch, tmp_path)
     monkeypatch.setattr(local_minutes, 'generate', lambda instructions, evidence, tokens, schema, cancel: draft_json(
         'Última decisão' if inserted.is_set() and 'Última decisão' in evidence else 'INCOMPLETA'))
     with patch.object(api.enhance, 'enhance', side_effect=AssertionError('não deve chamar IA externa')):
-        stopped = wait(backend, backend.stop_meeting()['job_id'])
-        result = stopped['result']
+        stop_id = backend.stop_meeting()['job_id']
+        assert finalizing.wait(3)
+        assert db.get_minutes_job(mid) is None
+        stopped = wait(backend, stop_id)
+        assert stopped and stopped['state'] == 'done'
+        stopping = stopped['result']
+        assert isinstance(stopping, dict)
+        assert backend._session is None
+        assert backend.job_status(stopping['finalize_job_id'])['state'] == 'running'
+        drained.set()
+        finalized = wait(backend, stopping['finalize_job_id'])
+        assert finalized and finalized['state'] == 'done'
+        result = finalized['result']
         assert isinstance(result, dict)
         jid = result['minutes_job_id']
-        assert backend.job_status(jid)['state'] == 'running'
+        assert backend.job_status(jid)['state'] == 'queued'
         meeting = db.get_meeting(mid)
         assert meeting and not meeting['summary_md']
-        drained.set()
         deadline = time.monotonic() + 5
         while 'tomada' not in backend.job_status(jid).get('detail', '') and time.monotonic() < deadline:
             time.sleep(.02)
@@ -97,25 +93,16 @@ def test_auto_minutes_wait_for_whisper_and_use_final_text(monkeypatch, tmp_path)
         assert meeting and not meeting['summary_md']
         ac.set()
         assert wait(backend, jid)['state'] == 'done'
+    backend._close_minutes()
     meeting = db.get_meeting(mid)
     assert meeting and 'Última decisão' in meeting['summary_md']
     assert meeting['summary_provider'] == 'local_minutes'
-    assert backend.save_minutes_edit(mid, 'Ata revisada')['ok']
+    assert backend.save_minutes_edit(mid, 'Ata revisada', meeting['summary_md'])['ok']
     db.conn().close()
     db._local.conn = None
     updated = db.get_meeting(mid)
     assert updated and updated['summary_md'] == 'Ata revisada'
     db.conn().close()
-
-
-def test_draft_does_not_print_unsupported_deadline_or_owner():
-    source = 'Foi definido que o painel precisa de revisão nesta semana.'
-    actions = [dict(acao='Revisar painel', responsavel='Ana', prazo='sexta', trecho=source),
-               dict(acao='Enviar orçamento', responsavel='Bruno', prazo='hoje', trecho='citação inventada')]
-    draft = local_minutes.summarize({'title': 'Painel', 'created_at': 0}, source,
-                                    lambda *args: draft_json('A equipe decidiu revisar o painel.', actions))
-    assert '| Revisar painel | não informado | não informado |' in draft
-    assert 'Enviar orçamento' not in draft
 
 
 def test_cancel_terminates_the_local_child_process(tmp_path):
@@ -175,7 +162,7 @@ def wait(backend, jid):
     deadline = time.monotonic() + 8
     while time.monotonic() < deadline:
         job = backend.job_status(jid)
-        if job['state'] != 'running':
+        if job['state'] not in ('running', 'queued'):
             return job
         time.sleep(.02)
     pytest.fail(f'Job não terminou: {jid}')

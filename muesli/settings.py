@@ -43,7 +43,7 @@ DEFAULTS = {
         "cloud_interval_sec": 12,   # 12 (realtime) | 60 (1m) | 300 (5m) | 480 (8m)
         "cloud_fallback": True,
     },
-    "minutes": {"enabled": False, "ac_only": False, "prefer_vulkan": False},
+    "minutes": {"enabled": False, "ac_only": False, "prefer_vulkan": False, "profile": "executiva"},
     "llm": {
         "provider": "auto",         # auto | ollama | openrouter | openai | groq | anthropic | none
         "ollama_url": "http://localhost:11434",

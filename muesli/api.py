@@ -15,7 +15,7 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-from . import audio, chatlogic, db, enhance, fonts, keypool, local_minutes, session, settings, stt, templates
+from . import audio, chatlogic, db, enhance, fonts, keypool, local_minutes, minutes_pipeline, minutes_queue, session, settings, stt, templates
 from . import APP_VERSION
 
 
@@ -33,7 +33,9 @@ class Api:
         self._minutes_idle = threading.Event()
         self._minutes_idle.set()
         self._closing = threading.Event()
-        self._minutes_jobs = {}
+        self._minutes_worker = None
+        self._minutes_wake = threading.Event()
+        self._minutes_running_id = None
         self._minutes_download_job = None
 
     def _new_job(self, kind):
@@ -101,31 +103,33 @@ class Api:
             job_id = self._stop_job = self._new_job("stop")
 
         def worker():
+            finalize_id = None
             try:
                 duration = sess.stop()
+                with self._start_lock:
+                    self._draining.add(sess.meeting_id)
+                    finalize_id = self._new_job('finalize_transcription')
+                    self._session = None
+                    self._stop_job = None
+                self._jobs[job_id].update(state='done', done_at=time.time(), result={
+                    'meeting_id': sess.meeting_id, 'duration': duration, 'finalize_job_id': finalize_id})
+                sess.wait_for_transcription()
                 m = db.get_meeting(sess.meeting_id)
                 if m and (not m.get("title_manual") or m["title"] == "Untitled meeting"):
                     guess = enhance.suggest_title(db.get_segments(sess.meeting_id))
                     if guess:
                         db.update_meeting(sess.meeting_id, title=guess, title_manual=0)
                 with self._start_lock:
-                    self._draining.add(sess.meeting_id)
-                    self._session = None
-                    self._stop_job = None
                     enabled = settings.load().get("minutes", {}).get("enabled")
                     minutes_job_id = self._queue_minutes(sess.meeting_id, automatic=True) if enabled else None
-                self._jobs[job_id].update(state="done", done_at=time.time(),
-                                          result={"meeting_id": sess.meeting_id, "duration": duration,
-                                                  "minutes_job_id": minutes_job_id})
-                try:
-                    sess.wait_for_transcription()
-                finally:
-                    with self._start_lock:
-                        self._draining.discard(sess.meeting_id)
+                self._jobs[finalize_id].update(state='done', done_at=time.time(), result={
+                    'minutes_job_id': minutes_job_id, 'local_minutes': bool(enabled)})
             except Exception as e:
-                self._jobs[job_id].update(state="error", error=str(e), done_at=time.time())
+                self._jobs[finalize_id or job_id].update(state='error', error=str(e), done_at=time.time())
             finally:
                 with self._start_lock:
+                    self._draining.discard(sess.meeting_id)
+                    self._minutes_wake.set()
                     if self._session is sess:
                         self._session = None
                         self._stop_job = None
@@ -204,13 +208,16 @@ class Api:
 
     # ---------------------------------------------------------------- enhance
 
-    def enhance_meeting(self, meeting_id, template_id):
+    def enhance_meeting(self, meeting_id, template_id, minutes_profile=None):
         meeting_id = int(meeting_id)
         if settings.load().get("minutes", {}).get("enabled"):
             with self._start_lock:
-                if self._session and self._session.meeting_id == meeting_id:
+                if (self._session and self._session.meeting_id == meeting_id) or meeting_id in self._draining:
                     return {"ok": False, "error": "Finalize a gravação antes de gerar uma ata local."}
-                return {"ok": True, "job_id": self._queue_minutes(meeting_id)}
+                job_id = self._queue_minutes(meeting_id, profile=minutes_profile)
+                if not job_id:
+                    return {"ok": False, "error": "Finalize a gravação antes de gerar uma ata local."}
+                return {"ok": True, "job_id": job_id, "persistent": True}
         job_id = self._new_job("enhance")
 
         def worker():
@@ -239,79 +246,78 @@ class Api:
         threading.Thread(target=worker, daemon=True).start()
         return {"ok": True, "job_id": job_id}
 
-    def _queue_minutes(self, meeting_id, automatic=False):
-        # Caller holds _start_lock; duplicate requests share one job.
-        if meeting_id in self._minutes_jobs:
-            return self._minutes_jobs[meeting_id]
-        jid = self._new_job("minutes")
-        self._minutes_jobs[meeting_id] = jid
+    def _queue_minutes(self, meeting_id, automatic=False, profile=None):
+        # Caller holds _start_lock. Preserve an existing draft on automatic stop.
+        meeting = db.get_meeting(meeting_id)
+        if not meeting or (automatic and meeting.get('summary_md')):
+            return None
+        default = settings.load().get('minutes', {}).get('profile', 'executiva')
+        if profile not in ('executiva', 'treinamento'):
+            profile = default if default in ('executiva', 'treinamento') else 'executiva'
+        current = db.get_minutes_job(meeting_id)
+        if current and current['id'] == self._minutes_running_id and current['profile'] != profile:
+            self._minutes_cancel.set()
+        job = db.enqueue_minutes(meeting_id, profile, minutes_pipeline.STRATEGY + ':' + local_minutes.MODEL_HASH)
+        if job:
+            self._start_minutes_worker()
+            self._minutes_wake.set()
+            return job['id']
+        return None
 
-        def worker():
-            claimed = False
-            job = self._jobs[jid]
-            try:
-                while True:
-                    cfg = settings.load().get("minutes", {})
-                    if not cfg.get("enabled"):
-                        raise RuntimeError("A geração de atas locais foi desativada.")
-                    m = db.get_meeting(meeting_id)
-                    if not m or not m.get("ended_at"):
-                        raise RuntimeError("Finalize a gravação antes de gerar uma ata local.")
-                    if automatic and m.get("summary_md"):
-                        job.update(state="done", done_at=time.time(), result={"skipped": True})
-                        return
-                    with self._start_lock:
-                        if self._closing.is_set():
-                            raise RuntimeError("O Muesli está sendo encerrado.")
-                        if self._session or self._draining or self._capture_requested:
-                            job["detail"] = "Aguardando a gravação e a transcrição terminarem…"
-                        elif self._minutes_active:
-                            job["detail"] = "Aguardando outra ata local…"
-                        elif cfg.get("ac_only") and not local_minutes.power_connected():
-                            job["detail"] = "Ata local aguardando conexão à tomada…"
-                        else:
-                            claimed = self._minutes_active = True
-                            self._minutes_cancel.clear()
-                            self._minutes_idle.clear()
-                            job["detail"] = "Gerando ata local…"
-                            break
-                    self._closing.wait(1)
-                notes = (m.get("notes_md") or "").strip()
-                transcript = enhance.format_transcript(db.get_segments(meeting_id)).strip()
-                evidence = "\n\n".join(filter(None, (f"Anotações:\n{notes}" if notes else "", transcript)))
-                if not evidence and automatic:
-                    job.update(state="done", done_at=time.time(), result={"skipped": True})
-                    return
-                generator = local_minutes.MinutesGenerator(cfg.get("prefer_vulkan", False), self._minutes_cancel,
-                                                            lambda detail: job.update(detail=detail))
-                started = time.monotonic()
-                md = local_minutes.summarize(m, evidence, generator)
-                if not db.write_local_minutes(meeting_id, md, original=m.get("summary_md") or ""):
-                    raise RuntimeError("A reunião ou a ata mudou durante a geração. O rascunho existente foi preservado.")
-                job.update(state="done", done_at=time.time(), result={
-                    "summary_md": md, "provider": "local_minutes", "meeting_id": meeting_id,
-                    "backend": generator.backend, "elapsed_sec": round(time.monotonic() - started)})
-            except Exception as e:
-                job.update(state="error", error=str(e), done_at=time.time())
-            finally:
-                with self._start_lock:
-                    if claimed:
-                        self._minutes_active = False
-                        self._minutes_idle.set()
-                    self._minutes_jobs.pop(meeting_id, None)
+    def _start_minutes_worker(self):
+        if not self._closing.is_set() and (self._minutes_worker is None or not self._minutes_worker.is_alive()):
+            restarting = self._minutes_worker is not None
+            self._minutes_worker = threading.Thread(target=minutes_queue.run, args=(self, restarting),
+                                                    daemon=True, name='local-minutes')
+            self._minutes_worker.start()
 
-        threading.Thread(target=worker, daemon=True).start()
-        return jid
+    def list_minutes_jobs(self):
+        jobs = db.list_minutes_jobs()
+        if any(job['state'] == 'queued' for job in jobs):
+            reason = minutes_queue.blocker(self, settings.load().get('minutes', {}))
+            for job in jobs:
+                if job['state'] == 'queued':
+                    job['detail'] = reason or 'Na fila de atas locais…'
+        return jobs
+
+    def set_minutes_paused(self, meeting_id, paused):
+        with self._start_lock:
+            job = db.get_minutes_job(int(meeting_id))
+            if not job or job['state'] in ('done', 'conflict'):
+                return {'ok': False, 'error': 'A ata não está na fila.'}
+            if paused:
+                if not db.set_minutes_state(job['id'], 'paused', 'Pausada manualmente.', expected=job['state']):
+                    return {'ok': False, 'error': 'O estado da ata mudou. Atualize a fila.'}
+                if job['id'] == self._minutes_running_id:
+                    self._minutes_cancel.set()
+            elif job['state'] in ('paused', 'partial', 'error'):
+                db.set_minutes_state(job['id'], 'queued', expected=job['state'])
+                self._start_minutes_worker()
+                self._minutes_wake.set()
+            return {'ok': True}
+
+    def get_minutes_preview(self, meeting_id):
+        return minutes_queue.preview(int(meeting_id))
 
     def _close_minutes(self):
         with self._start_lock:
             self._closing.set()
             self._minutes_cancel.set()
-        self._minutes_idle.wait(timeout=3)
+            self._minutes_wake.set()
+        if self._minutes_worker:
+            self._minutes_worker.join(timeout=3)
 
-    def save_minutes_edit(self, meeting_id, markdown):
+    def save_minutes_edit(self, meeting_id, markdown, original):
         markdown = (markdown or "").strip()
-        return {"ok": bool(markdown and db.write_local_minutes(int(meeting_id), markdown))}
+        if not markdown or not isinstance(original, str):
+            return {'ok': False}
+        mid = int(meeting_id)
+        if db.write_local_minutes(mid, markdown, original):
+            return {'ok': True}
+        meeting = db.get_meeting(mid)
+        if meeting and meeting['summary_provider'] == 'local_minutes':
+            return {'ok': False, 'latest': meeting['summary_md']}
+        return {'ok': False}
 
     def local_minutes_status(self):
         return {"installed": local_minutes.model_installed(),
@@ -362,6 +368,23 @@ class Api:
         return db.get_chat_messages(None)
 
     def job_status(self, job_id):
+        if isinstance(job_id, str) and job_id.startswith('minutes-'):
+            job = db.get_minutes_job_by_id(job_id)
+            if not job:
+                return {'state': 'unknown'}
+            mid, current = job['meeting_id'], job['state']
+            detail = job['detail']
+            if current == 'queued':
+                detail = minutes_queue.blocker(self, settings.load().get('minutes', {})) or 'Na fila de atas locais…'
+            summary = None
+            if current == 'done':
+                meeting = db.get_meeting(mid)
+                if meeting:
+                    summary = {'summary_md': meeting['summary_md'], 'provider': meeting['summary_provider'],
+                               'meeting_id': mid, 'backend': job['backend'], 'elapsed_sec': job['elapsed_sec'], 'detail': detail}
+            return {'kind': 'minutes', 'state': current, 'detail': detail,
+                    'completed': job['completed'], 'failed': job['failed'], 'total': job['total'],
+                    'result': summary, 'error': detail if current in ('error', 'conflict') else ''}
         self._prune_jobs()
         job = self._jobs.get(job_id)
         if not job:
@@ -513,7 +536,10 @@ tags: [reuniao/executiva]
             ""
         ]
         if (m.get("summary_md") or "").strip():
-            out += ["## 📌 Resumo & Pontos Chave", m["summary_md"].strip(), ""]
+            summary = m["summary_md"].strip()
+            if m.get('summary_provider') == 'local_minutes':
+                summary = minutes_pipeline.export_refs(summary)
+            out += ["## 📌 Resumo & Pontos Chave", summary, ""]
         if (m.get("notes_md") or "").strip():
             out += ["## ✍️ Anotações Rápidas", m["notes_md"].strip(), ""]
         if include_transcript:
@@ -803,6 +829,7 @@ tags: [reuniao/executiva]
     def exit_app(self):
         def _die():
             time.sleep(0.15)
+            self._close_minutes()
             if self._session is not None:
                 try:
                     self._session.stop()

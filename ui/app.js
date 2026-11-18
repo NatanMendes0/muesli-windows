@@ -20,6 +20,7 @@ const state = {
   startingNote: false,
   booted: false,
   searchSeq: 0,
+  minutesEdits: new Map(),
 };
 
 function isApiReady() {
@@ -255,10 +256,14 @@ async function openMeeting(id) {
   if ($("meetingCategory")) $("meetingCategory").value = m.category_id == null ? "" : String(m.category_id);
 
   renderTranscript(m.segments || []);
-  renderEnhanced(m.summary_md, m.summary_provider);
-  $("minutesStatus").textContent = minutesDetails.get(m.id) || "";
+  const edit = state.minutesEdits.get(m.id);
+  if (edit) editLocalMinutes($("enhancedBody"), edit);
+  else renderEnhanced(m.summary_md, m.summary_provider);
+  syncMinutesControls(m);
   renderChat($("chatPanel"), m.chat || []);
-  if ($("tabCopilot")?.classList.contains("active")) {
+  if (edit) {
+    selectTab("enhanced");
+  } else if ($("tabCopilot")?.classList.contains("active")) {
     selectTab("copilot");
   } else {
     selectTab(m.summary_md ? "enhanced" : "notes");
@@ -351,43 +356,63 @@ async function selectTab(which) {
   }
 }
 
-function renderEnhanced(md, provider) {
+function renderEnhanced(md, provider, preview = false) {
   const body = $("enhancedBody");
   if (!md) {
     body.innerHTML = `<div class="enhance-empty">Nenhum resumo gerado ainda.<br>
       Após a reunião, clique em <b>Aprimorar com IA</b> ou use a aba <b>Prompt Copilot</b>.</div>`;
     return;
   }
-  const provNames = { local_minutes: "Qwen local · rascunho para revisão", ollama: "IA Local (Ollama)", extractive: "sumarizador integrado (offline)",
+  const provNames = { local_minutes: "IA local · rascunho para revisão", ollama: "IA Local (Ollama)", extractive: "sumarizador integrado (offline)",
                       openrouter: "OpenRouter", anthropic: "Anthropic (Claude)", openai: "OpenAI (ChatGPT)", groq: "Groq" };
   body.innerHTML = `<div class="provider-tag">Gerado com ${provNames[provider] || provider || "IA"}</div>` +
                    renderMd(md);
   if (provider === "local_minutes") {
+    body.innerHTML = body.innerHTML.replace(/\[\[seg:(\d+)@(\d+:\d{2}:\d{2})\]\]/g,
+      '<button type="button" class="minutes-source" data-segment="$1" aria-label="Abrir transcrição em $2">$2</button>');
     const edit = document.createElement("button");
     edit.type = "button";
     edit.className = "btn-mini";
-    edit.textContent = "Editar ata";
-    edit.onclick = () => editLocalMinutes(body, md);
+    edit.textContent = preview ? "Voltar à ata salva" : "Editar ata";
+    edit.onclick = preview ? () => renderEnhanced(state.current?.summary_md, state.current?.summary_provider)
+      : () => {
+        const draft = {base: md, value: md};
+        state.minutesEdits.set(state.current.id, draft);
+        editLocalMinutes(body, draft);
+      };
     body.prepend(edit);
   }
 }
 
-function editLocalMinutes(body, md) {
+function editLocalMinutes(body, draft) {
   const mid = state.current.id;
   body.innerHTML = '<textarea class="minutes-editor" aria-label="Ata em Markdown"></textarea>' +
     '<button type="button" class="btn-mini">Salvar ata</button> <button type="button" class="btn-mini">Cancelar</button>';
   const editor = body.querySelector("textarea");
   const [save, cancel] = body.querySelectorAll("button");
-  editor.value = md;
+  editor.value = draft.value;
+  editor.oninput = () => { draft.value = editor.value; };
   editor.focus();
-  cancel.onclick = () => renderEnhanced(md, "local_minutes");
+  cancel.onclick = () => {
+    state.minutesEdits.delete(mid);
+    renderEnhanced(state.current.summary_md, state.current.summary_provider);
+  };
   save.onclick = async () => {
     const value = editor.value.trim();
     if (!value) { toast("A ata não pode ficar vazia."); return; }
-    save.disabled = cancel.disabled = true;
+    if (draft.saving) return;
+    draft.value = editor.value;
+    draft.saving = editor.disabled = save.disabled = cancel.disabled = true;
     try {
-      const res = await api().save_minutes_edit(mid, value);
-      if (!res.ok) { toast("Não foi possível salvar a ata."); return; }
+      const res = await api().save_minutes_edit(mid, value, draft.base);
+      if (!res.ok) {
+        if (typeof res.latest === "string") {
+          if (state.current?.id === mid) state.current.summary_md = res.latest;
+          toast("A ata salva mudou. Sua edição foi mantida. Copie o texto antes de cancelar e abrir a nova versão.", 7500);
+        } else toast("Não foi possível salvar a ata.");
+        return;
+      }
+      state.minutesEdits.delete(mid);
       if (state.current?.id === mid) {
         state.current.summary_md = value;
         renderEnhanced(value, "local_minutes");
@@ -396,9 +421,10 @@ function editLocalMinutes(body, md) {
     } catch (err) {
       toast("Não foi possível salvar a ata.");
     } finally {
-      save.disabled = cancel.disabled = false;
+      draft.saving = editor.disabled = save.disabled = cancel.disabled = false;
     }
   };
+  editor.disabled = save.disabled = cancel.disabled = !!draft.saving;
 }
 
 function renderTranscript(segments) {
@@ -423,6 +449,7 @@ function addSegmentEl(s) {
   const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 80;
   const div = document.createElement("div");
   div.className = "seg";
+  if (s.id !== undefined) div.id = `transcript-seg-${s.id}`;
   const mm = String(Math.floor(s.t0 / 60)).padStart(2, "0");
   const ss = String(Math.floor(s.t0 % 60)).padStart(2, "0");
   const who = s.speaker === "Me" ? "Eu" : s.speaker === "Them" ? "Outros" : "·";
@@ -540,7 +567,7 @@ async function stopRecording() {
   $("btnStop").disabled = true;
   if (state.current?.id === stoppedId) await flushNotes();
   const res = await api().stop_meeting();
-  const stopped = res.ok ? await waitJob(res.job_id) : null;
+  const capture = res.ok ? await waitJob(res.job_id) : null;
   state.recording = false;
   state.activeMeetingId = null;
   stopPolling();
@@ -548,15 +575,20 @@ async function stopRecording() {
   $("btnStop").disabled = false;
   setRecordingUi(false);
   refreshMeetings();
+  if (!capture) { if (!res.ok) toast(res.error); return; }
+  const stopped = await waitJob(capture.finalize_job_id);
+  if (!stopped) return;
+  if (stopped.minutes_job_id) watchMinutesJob(stoppedId, stopped.minutes_job_id);
   // Only reload the view if the user is still looking at the stopped meeting.
   if (state.current && state.current.id === stoppedId) {
     await openMeeting(stoppedId);
   }
-  if (!stopped) { if (!res.ok) toast(res.error); return; }
+
   if (stopped.minutes_job_id) {
     toast("Gravação finalizada. Ata local na fila.");
-    watchMinutes(stoppedId, stopped.minutes_job_id);
-  } else if (state.current?.id === stoppedId) {
+    await refreshMinutesQueue();
+    $("minutesQueue").open = true;
+  } else if (!stopped.local_minutes && state.current?.id === stoppedId) {
     toast("Gravação finalizada. Aprimorando notas com IA…");
     await enhanceNow();
   } else toast("Gravação finalizada. Transcrição salva.");
@@ -584,21 +616,126 @@ function waitJob(jobId, onProgress) {
 }
 
 /* ----------------------------------------------------------- enhance */
-const minutesDetails = new Map();
+let minutesJobs = new Map();
+const watchedMinutes = new Map();
+let minutesPreview;
+let minutesQueuePolling = false;
 
-function setMinutesDetail(mid, detail) {
-  if (detail) minutesDetails.set(mid, detail);
-  else minutesDetails.delete(mid);
-  if (state.current?.id === mid && $("minutesStatus").textContent !== detail) {
-    $("minutesStatus").textContent = detail;
-  }
+function watchMinutesJob(mid, id) {
+  watchedMinutes.set(mid, id);
 }
 
-async function watchMinutes(mid, jid) {
-  setMinutesDetail(mid, "Ata local na fila…");
-  const out = await waitJob(jid, j => setMinutesDetail(mid, j.detail || "Ata local na fila…"));
-  setMinutesDetail(mid, "");
-  if (out && !out.skipped) showEnhancement(mid, out);
+function syncMinutesControls(meeting, chooseFormat = true) {
+  const job = minutesJobs.get(meeting?.id);
+  const local = !!state.settings?.minutes?.enabled;
+  $("tplSelect").hidden = local;
+  $("minutesProfile").hidden = !local;
+  if (chooseFormat) $("minutesProfile").value = job?.profile || state.settings?.minutes?.profile || "executiva";
+  const label = job ? `${job.completed}/${job.total || "–"} blocos${job.failed ? ` · ${job.failed} com falha` : ""} · ${job.detail}` : "";
+  if ($("minutesStatus").textContent !== label) $("minutesStatus").textContent = label;
+}
+
+async function refreshMinutesQueue() {
+  if (minutesQueuePolling) return;
+  minutesQueuePolling = true;
+  try {
+    const rows = await api().list_minutes_jobs();
+    const next = new Map(rows.map(job => [job.meeting_id, job]));
+    minutesJobs = next;
+    for (const job of rows) {
+      if (!watchedMinutes.has(job.meeting_id)) watchMinutesJob(job.meeting_id, job.id);
+    }
+    for (const [mid, id] of watchedMinutes) {
+      if (next.get(mid)?.id === id) continue;
+      const status = await api().job_status(id);
+      if (watchedMinutes.get(mid) !== id) continue;
+      if (status.state === "done" && status.result) showEnhancement(mid, status.result);
+      if (["done", "unknown"].includes(status.state) || (next.has(mid) && next.get(mid).id !== id)) {
+        watchedMinutes.delete(mid);
+      }
+    }
+    syncMinutesControls(state.current, false);
+    $("minutesQueue").hidden = !rows.length;
+    $("minutesQueueCount").textContent = String(rows.length);
+    const container = $("minutesQueueRows");
+    const existing = new Map([...container.children].map(row => [row.dataset.job, row]));
+    for (const job of rows) {
+      const previous = existing.get(job.id);
+      existing.delete(job.id);
+      const structure = `${job.state}:${!!job.completed}`;
+      const statusText = `${job.completed}/${job.total || "–"} blocos · ${job.detail}`;
+      if (previous?.dataset.structure === structure) {
+        previous.querySelector("strong").textContent = job.title;
+        previous.querySelector("p").textContent = statusText;
+        const progress = previous.querySelector("progress");
+        progress.max = job.total || 1;
+        progress.value = job.completed;
+        progress.setAttribute("aria-label", `Progresso: ${job.title}`);
+        continue;
+      }
+      const row = document.createElement("section");
+      row.className = "minutes-job";
+      row.dataset.job = job.id;
+      row.dataset.structure = structure;
+      const controls = document.createElement("div");
+      controls.className = "minutes-controls";
+      const button = (label, action) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "btn-mini";
+        b.textContent = label;
+        b.onclick = async () => {
+          b.disabled = true;
+          try { await action(); }
+          catch { toast("Não foi possível atualizar a ata."); }
+          finally { b.disabled = false; }
+        };
+        controls.append(b);
+      };
+      const progress = document.createElement("progress");
+      progress.max = job.total || 1;
+      progress.value = job.completed;
+      progress.setAttribute("aria-label", `Progresso: ${job.title}`);
+      const title = document.createElement("strong");
+      title.textContent = job.title;
+      const detail = document.createElement("p");
+      detail.textContent = statusText;
+      button("Abrir", () => openMeeting(job.meeting_id));
+      if (["running", "queued", "paused", "partial", "error"].includes(job.state)) {
+        const pause = ["running", "queued"].includes(job.state);
+        button(pause ? "Pausar" : job.state === "partial" ? "Refazer falhas" : "Retomar", async () => {
+          const res = await api().set_minutes_paused(job.meeting_id, pause);
+          if (!res.ok) toast(res.error);
+          await refreshMinutesQueue();
+        });
+      }
+      if (job.completed && job.state !== "conflict") button("Ver parcial", async () => {
+        if (state.minutesEdits.has(job.meeting_id)) {
+          toast("Salve ou cancele sua edição antes de abrir a prévia.");
+          return;
+        }
+        const request = {id: job.id, mid: job.meeting_id};
+        minutesPreview = request;
+        if (state.current?.id !== job.meeting_id) await openMeeting(job.meeting_id);
+        const result = await api().get_minutes_preview(job.meeting_id);
+        if (minutesPreview !== request || minutesJobs.get(request.mid)?.id !== request.id ||
+            state.current?.id !== request.mid || state.minutesEdits.has(request.mid)) return;
+        if (!result.ok) { toast(result.error); return; }
+        if (state.current?.id === job.meeting_id) {
+          renderEnhanced(result.summary_md, "local_minutes", true);
+          selectTab("enhanced");
+        }
+      });
+      row.append(title, detail, progress, controls);
+      if (previous) previous.replaceWith(row);
+      else container.append(row);
+    }
+    for (const row of existing.values()) row.remove();
+  } catch (err) {
+    console.warn("Fila local indisponível", err);
+  } finally {
+    minutesQueuePolling = false;
+  }
 }
 
 async function enhanceNow() {
@@ -611,16 +748,20 @@ async function enhanceNow() {
   try {
     await flushNotes();
     if (state.current?.id !== mid) return;
-    const res = await api().enhance_meeting(mid, $("tplSelect").value);
+    const res = await api().enhance_meeting(mid, $("tplSelect").value, $("minutesProfile").value);
     if (!res.ok) { toast(res.error || "Não foi possível gerar o resumo.", 4000); return; }
-    const out = await waitJob(res.job_id, j => {
-      if (j.kind === "minutes") setMinutesDetail(mid, j.detail || "Ata local na fila…");
-    });
+    if (res.persistent) {
+      watchMinutesJob(mid, res.job_id);
+      toast("Ata local adicionada à fila.");
+      await refreshMinutesQueue();
+      $("minutesQueue").open = true;
+      return;
+    }
+    const out = await waitJob(res.job_id);
     if (out && !out.skipped) showEnhancement(mid, out);
   } catch (err) {
     toast("Não foi possível gerar o resumo.", 4000);
   } finally {
-    setMinutesDetail(mid, "");
     state.enhanceBusy = false;
     btn.disabled = false;
     $("enhanceLabel").textContent = "Aprimorar com IA";
@@ -628,6 +769,7 @@ async function enhanceNow() {
 }
 
 function showEnhancement(mid, out) {
+  if (minutesPreview?.mid === mid) minutesPreview = null;
   if (state.current?.id === mid) {
     state.current.summary_md = out.summary_md;
     state.current.summary_provider = out.provider;
@@ -637,13 +779,15 @@ function showEnhancement(mid, out) {
         $("noteTitle").value = out.title === "Untitled meeting" ? "" : out.title;
       }
     }
-    renderEnhanced(out.summary_md, out.provider);
-    selectTab("enhanced");
+    if (!$("enhancedBody").querySelector(".minutes-editor")) {
+      renderEnhanced(out.summary_md, out.provider);
+      selectTab("enhanced");
+    }
   }
   refreshMeetings();
   if (out.provider === "local_minutes") {
     const detail = out.backend ? ` · ${out.backend} · ${out.elapsed_sec} s` : "";
-    toast(`Rascunho da ata local salvo${detail}.`, 6500);
+    toast(`Rascunho da ata local salvo${detail}. ${out.detail || ""}`.trim(), 6500);
   } else toast("Notas aprimoradas com sucesso!");
 }
 
@@ -889,6 +1033,7 @@ async function openSettings() {
     $("setLocalMinutes").checked = !!s.minutes?.enabled;
     $("setLocalMinutesAc").checked = !!s.minutes?.ac_only;
     $("setLocalMinutesVulkan").checked = !!s.minutes?.prefer_vulkan;
+    $("setMinutesProfile").value = s.minutes?.profile || "executiva";
     const minutesModel = await syncMinutesModel();
     if (minutesModel.download_job_id && !minutesDownloadWatch) {
       watchMinutesDownload(minutesModel.download_job_id, minutesModel.size).catch(() => toast("Não foi possível acompanhar o download."));
@@ -922,7 +1067,7 @@ async function openSettings() {
     $("setConsent").checked = !!s.consent.enabled;
     $("setConsentText").value = s.consent.snippet;
     if ($("updateCurrentVer")) {
-      const v = (state.settingsState && state.settingsState.version) || "1.5.0";
+      const v = (state.settingsState && state.settingsState.version) || "1.6.0";
       $("updateCurrentVer").textContent = "Versão instalada: v" + v;
     }
     renderTplManager();
@@ -972,6 +1117,7 @@ async function saveSettings() {
       enabled: $("setLocalMinutes").checked,
       ac_only: $("setLocalMinutesAc").checked,
       prefer_vulkan: $("setLocalMinutesVulkan").checked,
+      profile: $("setMinutesProfile").value,
     },
     llm: {
       provider: $("setLlmProvider").value,
@@ -1006,6 +1152,7 @@ async function saveSettings() {
   toast("Configurações salvas com sucesso!");
   refreshStatus();
   state.settings = await api().get_settings();
+  syncMinutesControls(state.current);
 }
 
 /* ------------------------------------------------- templates manager */
@@ -1136,6 +1283,16 @@ function wireEvents() {
   $("btnStop").addEventListener("click", stopRecording);
   $("btnEnhance").addEventListener("click", enhanceNow);
   $("btnDownloadMinutes").addEventListener("click", downloadMinutesModel);
+  $("enhancedBody").addEventListener("click", event => {
+    const source = event.target.closest("button[data-segment]");
+    if (!source) return;
+    const segment = $(`transcript-seg-${source.dataset.segment}`);
+    if (!segment) { toast("Trecho não encontrado na transcrição desta reunião."); return; }
+    if ($("transcriptPane").classList.contains("collapsed")) $("btnCollapseTr").click();
+    segment.scrollIntoView({block: "center"});
+    segment.classList.add("source-highlight");
+    setTimeout(() => segment.classList.remove("source-highlight"), 2500);
+  });
   $("searchInput").addEventListener("input", () => refreshMeetings());
   $("notepad").addEventListener("input", scheduleNoteSave);
   $("tabNotes").addEventListener("click", () => selectTab("notes"));
@@ -1559,6 +1716,9 @@ async function boot() {
     try { renderChat($("homeChatPanel"), await api().get_global_chat()); } catch (e) {}
     await refreshStatus();
     setInterval(refreshStatus, 5000);
+    syncMinutesControls(state.current);
+    await refreshMinutesQueue();
+    setInterval(refreshMinutesQueue, 1500);
     toast("Muesli pronto para uso!", 2000);
     setTimeout(() => checkUpdatesUi(false), 1200);
   } catch (err) {

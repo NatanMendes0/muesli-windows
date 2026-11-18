@@ -1,9 +1,11 @@
 """SQLite storage. One connection per thread via thread local."""
+import hashlib
 import json
 import os
 import sqlite3
 import threading
 import time
+import uuid
 
 from . import settings
 
@@ -42,6 +44,33 @@ CREATE TABLE IF NOT EXISTS segments (
     FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_segments_meeting ON segments(meeting_id);
+CREATE INDEX IF NOT EXISTS idx_segments_timeline ON segments(meeting_id, t0, id);
+CREATE TABLE IF NOT EXISTS minutes_jobs (
+    id TEXT PRIMARY KEY,
+    meeting_id INTEGER NOT NULL UNIQUE REFERENCES meetings(id) ON DELETE CASCADE,
+    profile TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    state TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    original_digest TEXT NOT NULL,
+    snapshot TEXT NOT NULL DEFAULT '',
+    signature TEXT NOT NULL DEFAULT '',
+    total INTEGER NOT NULL DEFAULT 0,
+    backend TEXT NOT NULL DEFAULT '',
+    elapsed_sec REAL NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_minutes_queue ON minutes_jobs(state, created_at);
+CREATE TABLE IF NOT EXISTS minutes_blocks (
+    job_id TEXT NOT NULL REFERENCES minutes_jobs(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL,
+    state TEXT NOT NULL,
+    result_json TEXT,
+    start_sec REAL NOT NULL,
+    end_sec REAL NOT NULL,
+    PRIMARY KEY(job_id, ordinal)
+);
 CREATE TABLE IF NOT EXISTS custom_templates (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -137,23 +166,147 @@ def update_meeting(meeting_id: int, **fields):
     c.execute(f"UPDATE meetings SET {', '.join(sets)} WHERE id=?", vals)
     c.commit()
 
-def write_local_minutes(meeting_id, markdown, original=None):
-    """Preserve edits made while the model was running."""
-    c = conn()
-    if original is None:
-        cursor = c.execute("UPDATE meetings SET summary_md=? WHERE id=? AND summary_provider='local_minutes'",
-                           (markdown, meeting_id))
-    else:
-        cursor = c.execute("UPDATE meetings SET summary_md=?, summary_provider='local_minutes' "
-                           "WHERE id=? AND COALESCE(summary_md, '')=?",
-                           (markdown, meeting_id, original))
-    c.commit()
-    return cursor.rowcount == 1
+def write_local_minutes(meeting_id, markdown, original):
+    """Compare and swap so an editor cannot silently replace a newer version."""
+    with conn() as c:
+        return c.execute("UPDATE meetings SET summary_md=? WHERE id=? AND summary_provider='local_minutes' "
+                         "AND COALESCE(summary_md, '')=?", (markdown, meeting_id, original)).rowcount == 1
 
 
 def get_meeting(meeting_id: int):
     row = conn().execute("SELECT * FROM meetings WHERE id=?", (meeting_id,)).fetchone()
     return dict(row) if row else None
+
+
+# Durable minutes queue. All changes are local to the meeting database.
+def _digest(text):
+    return hashlib.sha256((text or '').encode('utf-8')).hexdigest()
+
+
+def minutes_watermark(meeting_id):
+    row = conn().execute('''SELECT notes_md,
+        (SELECT COALESCE(MAX(id),0) FROM segments WHERE meeting_id=m.id),
+        (SELECT COUNT(*) FROM segments WHERE meeting_id=m.id)
+        FROM meetings m WHERE m.id=?''', (meeting_id,)).fetchone()
+    return (_digest(row[0]), row[1], row[2]) if row else None
+
+
+def iter_minutes_segments(meeting_id, upper_id, page_size=256):
+    after = (-1, -1)
+    while True:
+        rows = conn().execute('''SELECT id,t0,t1,speaker,text FROM segments
+            WHERE meeting_id=? AND id<=? AND (t0,id)>(?,?) ORDER BY t0,id LIMIT ?''',
+                              (meeting_id, upper_id, *after, page_size)).fetchall()
+        if not rows:
+            return
+        yield from map(dict, rows)
+        after = rows[-1]['t0'], rows[-1]['id']
+
+
+def enqueue_minutes(meeting_id, profile, strategy):
+    c = conn()
+    with c:
+        c.execute('BEGIN IMMEDIATE')
+        meeting = c.execute('SELECT ended_at,summary_md FROM meetings WHERE id=?', (meeting_id,)).fetchone()
+        if not meeting or not meeting['ended_at']:
+            return None
+        job = get_minutes_job(meeting_id)
+        if job and job['profile'] == profile and job['strategy'] == strategy and job['state'] not in ('done', 'conflict'):
+            if job['state'] not in ('queued', 'running'):
+                c.execute("UPDATE minutes_jobs SET state='queued',detail='',updated_at=? WHERE id=?",
+                          (time.time(), job['id']))
+            return get_minutes_job(meeting_id)
+        now = time.time()
+        c.execute('DELETE FROM minutes_jobs WHERE meeting_id=?', (meeting_id,))
+        c.execute('''INSERT INTO minutes_jobs(id,meeting_id,profile,strategy,state,original_digest,created_at,updated_at)
+                     VALUES(?,?,?,?,'queued',?,?,?)''',
+                  ('minutes-' + uuid.uuid4().hex, meeting_id, profile, strategy, _digest(meeting['summary_md']), now, now))
+        return get_minutes_job(meeting_id)
+
+
+def get_minutes_job(meeting_id):
+    row = conn().execute('SELECT * FROM minutes_jobs WHERE meeting_id=?', (meeting_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_minutes_job_by_id(job_id):
+    row = conn().execute('''SELECT j.*,m.title,
+         (SELECT COUNT(*) FROM minutes_blocks b WHERE b.job_id=j.id AND b.state='done') AS completed,
+         (SELECT COUNT(*) FROM minutes_blocks b WHERE b.job_id=j.id AND b.state='error') AS failed
+         FROM minutes_jobs j JOIN meetings m ON m.id=j.meeting_id WHERE j.id=?''', (job_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_minutes_jobs():
+    rows = conn().execute('''SELECT j.id,j.meeting_id,j.state,j.profile,j.total,j.detail,m.title,
+         (SELECT COUNT(*) FROM minutes_blocks b WHERE b.job_id=j.id AND b.state='done') AS completed,
+         (SELECT COUNT(*) FROM minutes_blocks b WHERE b.job_id=j.id AND b.state='error') AS failed
+         FROM minutes_jobs j JOIN meetings m ON m.id=j.meeting_id WHERE j.state!='done' ORDER BY j.created_at''')
+    return [dict(row) for row in rows]
+
+
+def next_minutes_job():
+    row = conn().execute("SELECT * FROM minutes_jobs WHERE state='queued' ORDER BY created_at LIMIT 1").fetchone()
+    return dict(row) if row else None
+
+
+def recover_minutes_jobs():
+    with conn() as c:
+        c.execute("UPDATE minutes_jobs SET state='queued',detail='' WHERE state='running'")
+
+
+def set_minutes_state(job_id, state, detail='', expected=None):
+    sql = 'UPDATE minutes_jobs SET state=?, detail=?, updated_at=? WHERE id=?'
+    args = (state, detail, time.time(), job_id)
+    if expected:
+        sql += ' AND state=?'
+        args += (expected,)
+    with conn() as c:
+        return c.execute(sql, args).rowcount == 1
+
+
+def prepare_minutes(job_id, signature, total, watermark=None):
+    with conn() as c:
+        c.execute('BEGIN IMMEDIATE')
+        row = c.execute("SELECT signature FROM minutes_jobs WHERE id=? AND state='running'", (job_id,)).fetchone()
+        if not row:
+            return False
+        if row['signature'] != signature:
+            c.execute('DELETE FROM minutes_blocks WHERE job_id=?', (job_id,))
+        c.execute('UPDATE minutes_jobs SET signature=?,total=?,snapshot=? WHERE id=?',
+                  (signature, total, json.dumps(watermark), job_id))
+        return True
+
+
+def save_minutes_block(job_id, ordinal, state, result, start, end):
+    with conn() as c:
+        return c.execute('''INSERT OR REPLACE INTO minutes_blocks(job_id,ordinal,state,result_json,start_sec,end_sec)
+            SELECT id,?,?,?,?,? FROM minutes_jobs WHERE id=? AND state='running' ''',
+                         (ordinal, state, json.dumps(result, ensure_ascii=False), start, end, job_id)).rowcount == 1
+
+
+def load_minutes_blocks(job_id):
+    rows = conn().execute('SELECT * FROM minutes_blocks WHERE job_id=? ORDER BY ordinal', (job_id,))
+    return {row['ordinal']: {**dict(row), 'result': json.loads(row['result_json'] or 'null')} for row in rows}
+
+
+def finish_minutes(job_id, markdown, backend, elapsed, detail, watermark):
+    """Publish atomically only if the source and the previously visible draft still match."""
+    with conn() as c:
+        c.execute('BEGIN IMMEDIATE')
+        job = c.execute("SELECT * FROM minutes_jobs WHERE id=? AND state='running'", (job_id,)).fetchone()
+        if not job:
+            return False
+        mid = job['meeting_id']
+        meeting = get_meeting(mid)
+        if not meeting or _digest(meeting['summary_md']) != job['original_digest'] or minutes_watermark(mid) != watermark:
+            c.execute("UPDATE minutes_jobs SET state='conflict',detail=?,updated_at=? WHERE id=?",
+                      ('A fonte ou a ata mudou. O rascunho existente foi preservado. Gere de novo para atualizar.', time.time(), job_id))
+            return False
+        c.execute("UPDATE meetings SET summary_md=?,summary_provider='local_minutes' WHERE id=?", (markdown, mid))
+        c.execute("UPDATE minutes_jobs SET state='done',backend=?,elapsed_sec=?,detail=?,updated_at=? WHERE id=?",
+                  (backend, elapsed, detail, time.time(), job_id))
+        return True
 
 def delete_meeting(meeting_id: int):
     c = conn()

@@ -111,19 +111,25 @@ no ícone da bandeja para sair. A inicialização automática fica em Configura�
 ### Atas executivas offline (Windows x64)
 
 1. Em **Configurações → IA → Atas locais**, clique em **Baixar modelo para atas locais**.
-   O Qwen2.5 1.5B Instruct Q4_K_M é opcional e ocupa 1,12 GB. O pacote inclui o motor
+   O Qwen3-4B-Instruct-2507 Q4_K_M é o único modelo integrado de atas e ocupa 2,50 GB.
+   O modelo de 1,5B de instalações anteriores não será usado. O pacote inclui o motor
    `llama.cpp`; não precisa de Ollama, GPU, servidor ou chave de API.
-2. Marque **Gerar ata local** e salve. Após parar a reunião, o Muesli espera a
-   transcrição terminar, processa transcrições longas em partes e salva um rascunho
-   na aba **Aprimorado (IA)**. Use **Editar ata** para revisar e salvar o Markdown.
+2. Ative **Gerar ata local** e escolha **Ata executiva** ou **Treinamento / palestra**.
+   Após parar a reunião, o Muesli espera a transcrição terminar, processa por blocos
+   e salva a ata em **Aprimorado (IA)**. Clique nos horários para abrir a fala de origem.
+   Use **Editar ata** para revisar e salvar o Markdown.
 3. Na bateria, o motor usa até 2 threads (até 4 na tomada) e roda com prioridade
-   abaixo da normal. Se marcar **Aguardar conexão à tomada**, a ata espera enquanto
-   o Muesli estiver aberto, inclusive na bandeja. Se sair do aplicativo, reabra a
-   reunião e use **Aprimorar com IA** para iniciar de novo. Iniciar uma nova gravação
-   também interrompe uma geração em curso para priorizar a captura.
+   abaixo da normal. A fila preserva os blocos concluídos ao começar outra gravação
+   ou fechar o Muesli. O trabalho retoma quando o aplicativo estiver aberto, sem gravação
+   ativa e, se a opção estiver marcada, na tomada. Também é possível pausar manualmente.
+4. Se houver falhas, use **Ver parcial** na fila ou **Refazer falhas**. A prévia indica
+   as lacunas e não sobrescreve uma ata anterior. Respostas incompletas são refeitas
+   com um orçamento maior e instruções mais concisas antes de marcar falha.
 
-O formato da ata é fixo: resumo, deliberações e plano de ação. O modelo é usado só
-para atas. Para que o áudio também fique offline, selecione **Whisper local** na
+O formato executivo traz deliberações e plano de ação; treinamento/palestra traz
+capítulos, aprendizados, materiais citados e dúvidas. Sessões longas são retomáveis;
+o tempo depende da densidade e do hardware. Para que o áudio também fique offline,
+selecione **Whisper local** na
 aba **Transcrição**. O chat continua com seu provedor separado. Se executar do
 código-fonte, prepare o motor com `.\scripts\install-minutes-runtime.ps1` no PowerShell.
 

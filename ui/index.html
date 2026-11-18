@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>Muesli v1.5.0</title>
+<title>Muesli v1.6.0</title>
 <script>
 (function(){try{var t=localStorage.getItem("muesli_theme")||"light";if(t==="auto"){t=(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";}document.documentElement.dataset.theme=t;}catch(e){}})();
 </script>
@@ -23,7 +23,7 @@
         <path d="M13.5 7.5 c0 -1.2 1 -1.2 1 -2.4"/>
       </svg>
       <span class="name">Muesli</span>
-      <span class="ver-badge">v1.5.0</span>
+      <span class="ver-badge">v1.6.0</span>
     </div>
 
     <button class="btn-new" id="btnNew"><span class="dot"></span><span id="btnNewLabel">Nova reunião</span></button>
@@ -42,6 +42,10 @@
       <button class="category-add" id="btnAddCategory" title="Criar categoria">+</button>
     </div>
     <div class="meeting-list" id="meetingList"></div>
+    <details class="minutes-queue" id="minutesQueue" hidden>
+      <summary>Fila de atas locais <span id="minutesQueueCount"></span></summary>
+      <div id="minutesQueueRows"></div>
+    </details>
 
     <div class="sidebar-foot">
       <div class="status-line" id="statusLine">Iniciando backend...</div>
@@ -145,6 +149,10 @@
 
       <div class="action-bar">
         <select class="tpl-select" id="tplSelect" title="Modelo de Ata / Resumo"></select>
+        <select class="tpl-select" id="minutesProfile" aria-label="Formato da ata local" hidden>
+          <option value="executiva">Ata executiva</option>
+          <option value="treinamento">Treinamento / palestra</option>
+        </select>
         <button class="btn-enhance" id="btnEnhance">
           <span id="enhanceLabel">Aprimorar com IA</span>
         </button>
@@ -356,7 +364,7 @@
       <div class="set-section" data-set="ai">
         <div class="ai-prov-card">
           <strong>Atas locais (offline)</strong>
-          <p class="hint">Qwen2.5 1.5B · 1,12 GB. Funciona sem Ollama ou chave de API. Só gera atas; não altera a transcrição nem o provedor do chat.</p>
+          <p class="hint">Qwen3 4B Instruct · 2,50 GB. Novo modelo padrão para atas locais. Não usa Ollama nem chave de API e não altera a transcrição nem o chat.</p>
           <button type="button" class="btn-mini" id="btnDownloadMinutes">Baixar modelo para atas locais</button>
           <progress id="minutesDownloadProgress" max="100" value="0" hidden aria-label="Download do modelo"></progress>
           <p id="minutesModelHint" class="hint" role="status"></p>
@@ -373,7 +381,14 @@
             <input type="checkbox" id="setLocalMinutesAc">
             <label for="setLocalMinutesAc">Aguardar conexão à tomada antes de gerar</label>
           </div>
-          <div class="hint">A ata usa um formato executivo fixo. Para também manter o áudio offline, use o Whisper local na aba Transcrição.</div>
+          <div class="field">
+            <label for="setMinutesProfile">Formato padrão</label>
+            <select id="setMinutesProfile">
+              <option value="executiva">Ata executiva</option>
+              <option value="treinamento">Treinamento / palestra</option>
+            </select>
+          </div>
+          <div class="hint">A fila salva o progresso entre gravações e reinícios. Para manter também o áudio offline, use o Whisper local na aba Transcrição.</div>
         </div>
         <div class="field">
           <label>Provedor de IA para Resumo e Chat</label>
@@ -480,7 +495,7 @@
         <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
           <div>
             <div style="font-size:14px; font-weight:700; color:var(--ink);">Muesli para Windows</div>
-            <div style="font-size:12.5px; color:var(--muted);" id="updateCurrentVer">Versão instalada: v1.5.0</div>
+            <div style="font-size:12.5px; color:var(--muted);" id="updateCurrentVer">Versão instalada: v1.6.0</div>
           </div>
           <span style="flex:1"></span>
           <button class="btn-plain" id="btnCheckUpdatesNow" style="padding:8px 16px; font-weight:600;">

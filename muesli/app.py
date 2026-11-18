@@ -83,6 +83,8 @@ class App:
 
     def run(self):
         db.init()
+        db.recover_minutes_jobs()
+        self.api._start_minutes_worker()
         ui_cfg = settings.load().get("ui", {})
         if ui_cfg.get("disable_gpu"):
             os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",

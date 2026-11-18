@@ -14,6 +14,15 @@
 }
 
 #minutesStatus { color: var(--info-fg); }
+.minutes-queue { margin: 4px 10px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; }
+.minutes-queue summary { cursor: pointer; font-size: 12px; }
+#minutesQueueRows { max-height: 160px; overflow-y: auto; }
+.minutes-job { margin: 6px 0; padding: 6px 0; border-top: 1px solid var(--border); font-size: 12px; }
+.minutes-job p { margin: 4px 0; }
+.minutes-job progress { width: 100%; }
+.minutes-controls { display: flex; gap: 4px; flex-wrap: wrap; }
+.minutes-source { padding: 0 3px; color: var(--info-fg); cursor: pointer; font: inherit; text-decoration: underline; background: transparent; border: 0; }
+.seg.source-highlight { outline: 2px solid var(--info-fg); outline-offset: -2px; }
 
 @font-face {
   font-family: "Satoshi";
