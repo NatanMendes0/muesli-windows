@@ -290,8 +290,8 @@ def load_minutes_blocks(job_id):
     return {row['ordinal']: {**dict(row), 'result': json.loads(row['result_json'] or 'null')} for row in rows}
 
 
-def finish_minutes(job_id, markdown, backend, elapsed, detail, watermark):
-    """Publish atomically only if the source and the previously visible draft still match."""
+def finish_minutes(job_id, render, backend, elapsed, detail, watermark, suggested_title=''):
+    """Publish the title and draft together only if the source and draft still match."""
     with conn() as c:
         c.execute('BEGIN IMMEDIATE')
         job = c.execute("SELECT * FROM minutes_jobs WHERE id=? AND state='running'", (job_id,)).fetchone()
@@ -303,7 +303,10 @@ def finish_minutes(job_id, markdown, backend, elapsed, detail, watermark):
             c.execute("UPDATE minutes_jobs SET state='conflict',detail=?,updated_at=? WHERE id=?",
                       ('A fonte ou a ata mudou. O rascunho existente foi preservado. Gere de novo para atualizar.', time.time(), job_id))
             return False
-        c.execute("UPDATE meetings SET summary_md=?,summary_provider='local_minutes' WHERE id=?", (markdown, mid))
+        if suggested_title and not meeting['title_manual']:
+            meeting['title'] = suggested_title
+        c.execute("UPDATE meetings SET title=?,summary_md=?,summary_provider='local_minutes' WHERE id=?",
+                  (meeting['title'], render(meeting), mid))
         c.execute("UPDATE minutes_jobs SET state='done',backend=?,elapsed_sec=?,detail=?,updated_at=? WHERE id=?",
                   (backend, elapsed, detail, time.time(), job_id))
         return True

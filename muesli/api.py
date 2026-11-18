@@ -115,12 +115,12 @@ class Api:
                     'meeting_id': sess.meeting_id, 'duration': duration, 'finalize_job_id': finalize_id})
                 sess.wait_for_transcription()
                 m = db.get_meeting(sess.meeting_id)
-                if m and (not m.get("title_manual") or m["title"] == "Untitled meeting"):
+                enabled = settings.load().get("minutes", {}).get("enabled")
+                if not enabled and m and (not m.get("title_manual") or m["title"] == "Untitled meeting"):
                     guess = enhance.suggest_title(db.get_segments(sess.meeting_id))
                     if guess:
                         db.update_meeting(sess.meeting_id, title=guess, title_manual=0)
                 with self._start_lock:
-                    enabled = settings.load().get("minutes", {}).get("enabled")
                     minutes_job_id = self._queue_minutes(sess.meeting_id, automatic=True) if enabled else None
                 self._jobs[finalize_id].update(state='done', done_at=time.time(), result={
                     'minutes_job_id': minutes_job_id, 'local_minutes': bool(enabled)})
@@ -381,7 +381,8 @@ class Api:
                 meeting = db.get_meeting(mid)
                 if meeting:
                     summary = {'summary_md': meeting['summary_md'], 'provider': meeting['summary_provider'],
-                               'meeting_id': mid, 'backend': job['backend'], 'elapsed_sec': job['elapsed_sec'], 'detail': detail}
+                               'meeting_id': mid, 'title': meeting['title'], 'backend': job['backend'],
+                               'elapsed_sec': job['elapsed_sec'], 'detail': detail}
             return {'kind': 'minutes', 'state': current, 'detail': detail,
                     'completed': job['completed'], 'failed': job['failed'], 'total': job['total'],
                     'result': summary, 'error': detail if current in ('error', 'conflict') else ''}
@@ -718,13 +719,11 @@ tags: [reuniao/executiva]
                 data = r.json()
                 latest_tag = (data.get("tag_name") or "").strip()
                 has_update = parse_ver(latest_tag) > parse_ver(APP_VERSION)
-                zip_url = ""
-                zip_name = f"Muesli-windows-{latest_tag}.zip"
-                for asset in data.get("assets", []):
-                    if asset.get("name", "").endswith(".zip"):
-                        zip_url = asset.get("browser_download_url", "")
-                        zip_name = asset.get("name", zip_name)
-                        break
+                zip_name = f"Muesli-windows-x64-{latest_tag}.zip"
+                assets = {a.get("name"): a.get("browser_download_url") for a in data.get("assets", [])}
+                if not assets.get(zip_name) and assets.get("Muesli-windows-x64.zip"):
+                    zip_name = "Muesli-windows-x64.zip"
+                zip_url = assets.get(zip_name)
 
                 return {
                     "ok": True,
@@ -748,6 +747,8 @@ tags: [reuniao/executiva]
             if "/releases/tag/" in loc:
                 latest_tag = loc.rstrip("/").split("/releases/tag/")[-1].strip()
                 has_update = parse_ver(latest_tag) > parse_ver(APP_VERSION)
+                zip_name = (f"Muesli-windows-x64-{latest_tag}.zip" if parse_ver(latest_tag) >= [1, 6, 1]
+                            else "Muesli-windows-x64.zip")
                 return {
                     "ok": True,
                     "current_version": APP_VERSION,
@@ -756,8 +757,8 @@ tags: [reuniao/executiva]
                     "release_name": latest_tag,
                     "release_notes": "Nova versão disponível no GitHub Releases.",
                     "html_url": loc,
-                    "zip_url": f"https://github.com/NatanMendes0/muesli-windows/releases/download/{latest_tag}/Muesli-windows-x64.zip",
-                    "zip_name": "Muesli-windows-x64.zip",
+                    "zip_url": f"https://github.com/NatanMendes0/muesli-windows/releases/download/{latest_tag}/{zip_name}",
+                    "zip_name": zip_name,
                 }
 
             return {"ok": False, "error": f"Status HTTP {r.status_code}"}

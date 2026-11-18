@@ -72,9 +72,9 @@ recriada para funcionar inteiramente na sua máquina e de graça:
 
 ### Opção 1: baixar o aplicativo (sem precisar do Python)
 
-1. Baixe `Muesli-windows-x64.zip` na [versão mais recente](../../releases/latest).
+1. Baixe `Muesli-windows-x64-vX.Y.Z.zip` na [versão mais recente](../../releases/latest).
 2. Descompacte em qualquer lugar (por exemplo, `C:\Apps\Muesli`).
-3. Execute `Muesli.exe`. O Windows SmartScreen pode avisar que a compilação não é
+3. Execute `Muesli-windows-x64-vX.Y.Z.exe`. O Windows SmartScreen pode avisar que a compilação não é
    assinada: clique em "Mais informações" e depois em "Executar assim mesmo", ou compile
    a partir do código-fonte.
 
@@ -116,7 +116,9 @@ no ícone da bandeja para sair. A inicialização automática fica em Configura�
    `llama.cpp`; não precisa de Ollama, GPU, servidor ou chave de API.
 2. Ative **Gerar ata local** e escolha **Ata executiva** ou **Treinamento / palestra**.
    Após parar a reunião, o Muesli espera a transcrição terminar, processa por blocos
-   e salva a ata em **Aprimorado (IA)**. Clique nos horários para abrir a fala de origem.
+   e salva a ata em **Aprimorado (IA)**. Acompanhe o progresso na **Fila de atas locais**,
+   sem precisar clicar em **Aprimorar com IA**. Ao consolidar o resumo, o Qwen propõe
+   um título para reuniões sem título manual. Clique nos horários para abrir a fala de origem.
    Use **Editar ata** para revisar e salvar o Markdown.
 3. Na bateria, o motor usa até 2 threads (até 4 na tomada) e roda com prioridade
    abaixo da normal. A fila preserva os blocos concluídos ao começar outra gravação

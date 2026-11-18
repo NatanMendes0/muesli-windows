@@ -138,17 +138,24 @@ def process(job, cfg, cancel):
         db.set_minutes_state(jid, 'partial', 'Alguns blocos falharam. Veja o rascunho parcial ou refaça só os blocos com falha.',
                              expected='running')
         return
-    status('Consolidando o resumo e montando a ata…')
-    try:
-        overview = pipeline.synopsis(records, profile, complete, status)
-    except local_minutes.GenerationTimeout:
-        overview = ''
-    check()
     latest = db.get_meeting(mid)
-    if latest:
-        markdown = pipeline.render_minutes(latest, profile, records, [], overview)
-        detail = '' if overview else 'Os capítulos estão completos, mas a síntese geral não ficou disponível.'
-        db.finish_minutes(jid, markdown, generator.backend, round(time.monotonic() - started), detail, watermark)
+    if not latest:
+        return
+    suggest_title = not latest.get('title_manual')
+    status('Consolidando o resumo e o título da ata…' if suggest_title else 'Consolidando o resumo e montando a ata…')
+    try:
+        overview, title = pipeline.synopsis(records, profile, complete, status, suggest_title=suggest_title)
+    except local_minutes.GenerationCancelled:
+        raise
+    except local_minutes.GenerationError:
+        overview, title = (records[0]['resumo'] if len(records) == 1 else ''), ''
+    check()
+    detail = '' if overview else 'Os capítulos estão completos, mas a síntese geral não ficou disponível.'
+
+    def render(meeting):
+        return pipeline.render_minutes(meeting, profile, records, [], overview)
+
+    db.finish_minutes(jid, render, generator.backend, round(time.monotonic() - started), detail, watermark, title)
 
 
 def preview(meeting_id):

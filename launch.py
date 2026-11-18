@@ -3,7 +3,9 @@
 run.bat uses `python -m muesli` after cd-ing here; the registry Run key launches
 processes from System32, where -m muesli cannot resolve, so it points at this file.
 """
+import csv
 import os
+import re
 import sys
 
 # Inject native OS certificate store (Windows CryptoAPI) to trust corporate/proxy Root CAs
@@ -40,7 +42,14 @@ def unblock_self():
                     pass
 
 
-unblock_self()
+def _other_instance_pids(tasklist_csv, current_pid):
+    for row in csv.reader(tasklist_csv.splitlines()):
+        if len(row) < 2:
+            continue
+        image, pid = row[:2]
+        if (re.fullmatch(r'Muesli(?:-windows-x64-v\d+\.\d+\.\d+)?\.exe', image, re.I)
+                and re.fullmatch(r'[0-9]+', pid) and int(pid) != current_pid):
+            yield pid
 
 
 def kill_other_instances():
@@ -49,14 +58,16 @@ def kill_other_instances():
         return
     try:
         import subprocess
-        current_pid = os.getpid()
-        cmd = f'taskkill /F /FI "IMAGENAME eq Muesli.exe" /FI "PID ne {current_pid}"'
-        subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:
+        system32 = os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32')
+        listed = subprocess.run([os.path.join(system32, 'tasklist.exe'), '/FO', 'CSV', '/NH'],
+                                capture_output=True, text=True, errors='replace', timeout=8, check=True,
+                                creationflags=subprocess.CREATE_NO_WINDOW)
+        for pid in _other_instance_pids(listed.stdout, os.getpid()):
+            subprocess.run([os.path.join(system32, 'taskkill.exe'), '/F', '/PID', pid], timeout=5,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
         pass
-
-
-kill_other_instances()
 
 
 def selftest():
@@ -88,7 +99,9 @@ def selftest():
 
 
 if __name__ == "__main__":
+    unblock_self()
     if "--selftest" in sys.argv:
         selftest()
+    kill_other_instances()
     from muesli.app import main
     main()

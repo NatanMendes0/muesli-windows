@@ -131,6 +131,50 @@ def database(tmp_path, monkeypatch):
         db._local.conn = None
 
 
+@pytest.mark.parametrize('mode, expected', [
+    ('automatic', 'Homologação do portal'),
+    ('manual', 'Título definido por mim'),
+    ('renamed', 'Título definido por mim'),
+    ('bad_output', 'Título provisório'),
+    ('timeout', 'Título provisório'),
+])
+def test_local_minutes_publish_title_with_the_summary(database, monkeypatch, mode, expected):
+    mid = db.create_meeting(expected if mode == 'manual' else '', 'auto')
+    if mode != 'manual':
+        db.update_meeting(mid, title='Título provisório')
+    db.end_meeting(mid, 180)
+    db.add_segment(mid, 0, 4, 'Them', 'Validamos a homologação do portal.')
+    cfg = {'enabled': True}
+    monkeypatch.setattr(settings, 'load', lambda: {'minutes': cfg})
+    generated = []
+
+    def model(prompt, evidence, cap, schema, cancel):
+        if schema == mp.BLOCK_SCHEMA:
+            return '{"resumo":"O grupo validou a homologação do portal.","fatos":[]}'
+        generated.append(evidence)
+        if mode == 'renamed':
+            api.Api().rename_meeting(mid, expected)
+        if mode == 'timeout':
+            raise local_minutes.GenerationTimeout()
+        title = 'Título: "# Homologação do portal"' if mode != 'bad_output' else '<think>sem título</think>'
+        return json.dumps(dict(titulo=title, resumo='A homologação foi validada.'))
+
+    monkeypatch.setattr(local_minutes, 'generate', model)
+    job = db.enqueue_minutes(mid, 'executiva', 'estratégia')
+    assert job and db.set_minutes_state(job['id'], 'running')
+    minutes_queue.process(job, cfg, threading.Event())
+    meeting = db.get_meeting(mid)
+    assert meeting and meeting['title'] == expected
+    assert meeting['summary_md'].startswith(f'# Ata Executiva: {expected}\n')
+    assert int(meeting['title_manual']) == int(mode in ('manual', 'renamed'))
+    result = api.Api().job_status(job['id'])['result']
+    assert isinstance(result, dict) and result['title'] == expected
+    if mode == 'manual':
+        assert not generated
+    else:
+        assert generated == ['O grupo validou a homologação do portal.']
+
+
 def test_checkpoint_survives_reopen_and_protects_summary(database):
     mid = db.create_meeting('Reunião', 'auto')
     db.end_meeting(mid, 240)
@@ -157,7 +201,7 @@ assert db.get_minutes_job(int(sys.argv[2]))['state'] == 'queued'
     assert retry and retry['id'] == job['id']
     db.update_meeting(mid, summary_md='ata revisada')
     db.set_minutes_state(job['id'], 'running')
-    assert not db.finish_minutes(job['id'], 'nova ata', 'CPU', 10, '', watermark)
+    assert not db.finish_minutes(job['id'], lambda _: 'nova ata', 'CPU', 10, '', watermark, 'novo título')
     meeting = db.get_meeting(mid)
     assert meeting and meeting['summary_md'] == 'ata revisada'
     db.delete_meeting(mid)

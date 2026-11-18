@@ -38,7 +38,7 @@ def test_auto_minutes_wait_for_whisper_and_use_final_text(monkeypatch, tmp_path)
     monkeypatch.setattr(db._local, 'conn', None, raising=False)
     monkeypatch.setattr(settings, 'load', lambda: {'minutes': {'enabled': True, 'ac_only': True}})
     db.init()
-    mid = db.create_meeting('Projeto', 'auto')
+    mid = db.create_meeting('', 'auto')
     drained = threading.Event()
     inserted = threading.Event()
     finalizing = threading.Event()
@@ -64,8 +64,14 @@ def test_auto_minutes_wait_for_whisper_and_use_final_text(monkeypatch, tmp_path)
             inserted.set()
 
     monkeypatch.setattr(backend, '_session', Capture())
-    monkeypatch.setattr(local_minutes, 'generate', lambda instructions, evidence, tokens, schema, cancel: draft_json(
-        'Última decisão' if inserted.is_set() and 'Última decisão' in evidence else 'INCOMPLETA'))
+    def model(instructions, evidence, tokens, schema, cancel):
+        assert inserted.is_set() and 'Última decisão' in evidence
+        if 'titulo' in schema['properties']:
+            return json.dumps(dict(resumo='Última decisão', titulo='Revisão do projeto'))
+        return draft_json('Última decisão')
+
+    monkeypatch.setattr(local_minutes, 'generate', model)
+    monkeypatch.setattr(api.enhance, 'suggest_title', lambda _: pytest.fail('não deve inventar título provisório'))
     with patch.object(api.enhance, 'enhance', side_effect=AssertionError('não deve chamar IA externa')):
         stop_id = backend.stop_meeting()['job_id']
         assert finalizing.wait(3)
@@ -84,7 +90,7 @@ def test_auto_minutes_wait_for_whisper_and_use_final_text(monkeypatch, tmp_path)
         jid = result['minutes_job_id']
         assert backend.job_status(jid)['state'] == 'queued'
         meeting = db.get_meeting(mid)
-        assert meeting and not meeting['summary_md']
+        assert meeting and not meeting['summary_md'] and meeting['title'] == 'Untitled meeting'
         deadline = time.monotonic() + 5
         while 'tomada' not in backend.job_status(jid).get('detail', '') and time.monotonic() < deadline:
             time.sleep(.02)
@@ -96,6 +102,7 @@ def test_auto_minutes_wait_for_whisper_and_use_final_text(monkeypatch, tmp_path)
     backend._close_minutes()
     meeting = db.get_meeting(mid)
     assert meeting and 'Última decisão' in meeting['summary_md']
+    assert meeting['title'] == 'Revisão do projeto'
     assert meeting['summary_provider'] == 'local_minutes'
     assert backend.save_minutes_edit(mid, 'Ata revisada', meeting['summary_md'])['ok']
     db.conn().close()

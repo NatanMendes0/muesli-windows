@@ -1067,7 +1067,7 @@ async function openSettings() {
     $("setConsent").checked = !!s.consent.enabled;
     $("setConsentText").value = s.consent.snippet;
     if ($("updateCurrentVer")) {
-      const v = (state.settingsState && state.settingsState.version) || "1.6.0";
+      const v = (state.settingsState && state.settingsState.version) || "1.6.1";
       $("updateCurrentVer").textContent = "Versão instalada: v" + v;
     }
     renderTplManager();
@@ -1647,7 +1647,7 @@ async function startDownloadUpdate() {
           btn.disabled = false;
           progEl.style.display = "none";
           toast("Download concluído! A pasta Downloads foi aberta.", 6000);
-          $("updateStatusText").innerHTML = `<span style="color:var(--ok); font-weight:700;">✅ Arquivo salvo em Downloads\\${escapeHtml(j.result?.filename || "")}. Extraia o novo Muesli.exe!</span>`;
+          $("updateStatusText").innerHTML = `<span style="color:var(--ok); font-weight:700;">✅ Arquivo salvo em Downloads\\${escapeHtml(j.result?.filename || "")}. Extraia a pasta inteira e abra o executável da nova versão.</span>`;
         } else if (j.state === "error") {
           clearInterval(pollInterval);
           btn.disabled = false;
