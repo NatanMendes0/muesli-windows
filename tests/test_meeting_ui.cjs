@@ -220,6 +220,33 @@ test('NVIDIA NIM testa e salva a própria chave sem modificar a da OpenAI ou a t
   assert.equal($('settingsModal').classList.contains('visible'), false);
 });
 
+test('Atas locais carregam a preferência Vulkan antiga e salvam CUDA pelo seletor', async t => {
+  const {$, api, calls} = setup(t);
+  let minutes = {enabled: true, prefer_vulkan: true};
+  api.get_settings = async () => ({audio: {}, stt: {engine: 'local'}, llm: {}, minutes, consent: {}});
+  api.list_audio_devices = async () => ({ok: true, mics: [], loopbacks: []});
+  api.local_minutes_status = async () => ({runtime: true, installed: true});
+  api.list_ollama_models = async () => [];
+  api.get_state = async () => ({llm: {}, stt_model: {}, audio_backend_ok: true});
+  api.save_settings = async patch => {
+    calls.push(['saveSettings', patch.minutes]);
+    minutes = patch.minutes;
+    return {ok: true};
+  };
+  $('btnSettings').click();
+  await tick();
+  const backend = $('setLocalMinutesBackend');
+  assert.equal(backend.value, 'vulkan');
+  backend.value = 'cuda';
+  $('btnSaveSettings').click();
+  await tick();
+  assert.deepEqual(calls.map(([action, saved]) => [action, saved.prefer_cuda, saved.prefer_vulkan]),
+    [['saveSettings', true, false]]);
+  $('btnSettings').click();
+  await tick();
+  assert.equal(backend.value, 'cuda');
+});
+
 test('Atualizar no aviso abre a aba Atualizações sem aguardar o carregamento das configurações', async t => {
   const {w, $, api, calls} = setup(t);
   let finishSettings;

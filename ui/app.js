@@ -1198,7 +1198,8 @@ async function openSettings(tab = null) {
     // ai
     $("setLocalMinutes").checked = !!s.minutes?.enabled;
     $("setLocalMinutesAc").checked = !!s.minutes?.ac_only;
-    $("setLocalMinutesVulkan").checked = !!s.minutes?.prefer_vulkan;
+    $("setLocalMinutesBackend").value = s.minutes?.prefer_cuda ? "cuda"
+      : s.minutes?.prefer_vulkan ? "vulkan" : "cpu";
     $("setMinutesProfile").value = s.minutes?.profile || "executiva";
     const minutesModel = await syncMinutesModel();
     if (minutesModel.download_job_id && !minutesDownloadWatch) {
@@ -1263,6 +1264,7 @@ async function testNvidiaKey() {
 }
 
 async function saveSettings() {
+  const minutesBackend = $("setLocalMinutesBackend").value;
   let orModel = $("setSttOpenrouterModel") ? $("setSttOpenrouterModel").value : "openai/whisper-large-v3-turbo";
   if (orModel === "__custom__") {
     orModel = ($("setSttOpenrouterCustomModel")?.value || "").trim() || "openai/whisper-large-v3-turbo";
@@ -1301,7 +1303,8 @@ async function saveSettings() {
     minutes: {
       enabled: $("setLocalMinutes").checked,
       ac_only: $("setLocalMinutesAc").checked,
-      prefer_vulkan: $("setLocalMinutesVulkan").checked,
+      prefer_vulkan: minutesBackend === "vulkan",
+      prefer_cuda: minutesBackend === "cuda",
       profile: $("setMinutesProfile").value,
     },
     llm: {

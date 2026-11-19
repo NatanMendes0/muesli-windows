@@ -101,7 +101,8 @@ def process(job, cfg, cancel):
     def status(detail):
         db.set_minutes_state(jid, 'running', detail, expected='running')
 
-    generator = local_minutes.MinutesGenerator(cfg.get('prefer_vulkan', False), cancel, status)
+    generator = local_minutes.MinutesGenerator(cfg.get('prefer_vulkan', False), cancel, status,
+                                               prefer_cuda=cfg.get('prefer_cuda', False))
 
     def check():
         current = settings.load().get('minutes', {})

@@ -374,11 +374,15 @@
             <input type="checkbox" id="setLocalMinutes">
             <label for="setLocalMinutes">Gerar ata local ao finalizar e ao clicar em Aprimorar com IA</label>
           </div>
-          <div class="check-row">
-            <input type="checkbox" id="setLocalMinutesVulkan">
-            <label for="setLocalMinutesVulkan">Tentar GPU integrada Intel (Vulkan · experimental)</label>
+          <div class="field">
+            <label for="setLocalMinutesBackend">Motor do Qwen local</label>
+            <select id="setLocalMinutesBackend" aria-describedby="minutesBackendHint">
+              <option value="cpu">CPU (padrão)</option>
+              <option value="vulkan">GPU integrada Intel (Vulkan · experimental)</option>
+              <option value="cuda">GPU dedicada NVIDIA (CUDA)</option>
+            </select>
+            <div class="hint" id="minutesBackendHint">CUDA requer um driver NVIDIA compatível. Se a GPU selecionada estiver indisponível ou falhar, a ata continua na CPU.</div>
           </div>
-          <div class="hint">A CPU é o padrão. Se o driver não oferecer Vulkan ou a GPU falhar, o Muesli usa a CPU.</div>
           <div class="check-row">
             <input type="checkbox" id="setLocalMinutesAc">
             <label for="setLocalMinutesAc">Aguardar conexão à tomada antes de gerar</label>
@@ -467,11 +471,12 @@
               <div class="key-actions"><button type="button" class="btn-mini" id="btnTestNvidiaKey">Testar conexão</button></div>
             </div>
             <div class="field" style="margin-bottom:0;">
-              <label for="setModelNvidia">Modelo NVIDIA NIM</label>
+              <label for="setModelNvidia">Modelo NVIDIA NIM para chat</label>
               <input type="text" id="setModelNvidia" placeholder="nvidia/nemotron-3.5-lightning-30b-a3b" spellcheck="false">
             </div>
           </div>
-          <div class="hint">Para usar, selecione NVIDIA NIM acima. O chat e o aprimoramento podem enviar texto da reunião à NVIDIA; o teste envia apenas uma frase de exemplo. A transcrição e as Atas locais não mudam.</div>
+          <div class="hint">Selecione NVIDIA NIM como provedor para usar a chave. O resumo começa pelo Nemotron 3.5 Super VL e, em caso de timeout ou indisponibilidade, tenta Nemotron 3 Ultra e depois GLM 5.3 Flash.</div>
+          <div class="hint">O chat e o resumo em nuvem podem enviar texto da reunião à NVIDIA. O teste usa uma frase de exemplo no modelo de chat.</div>
           <div class="hint" id="nvidiaKeyTestStatus" role="status"></div>
         </div>
 

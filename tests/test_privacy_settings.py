@@ -9,7 +9,7 @@ import pytest
 import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from muesli import api, enhance, settings, stt  # noqa: E402
+from muesli import api, enhance, settings, stt, templates  # noqa: E402
 
 
 @pytest.fixture
@@ -44,6 +44,48 @@ def test_nvidia_nim_uses_only_its_own_key_and_verified_https(nim_settings, monke
     monkeypatch.setattr(enhance, 'ollama_models', lambda _: [])
     assert enhance.llm_complete('Instrução', 'Não envie automaticamente')[0] is None
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize(('results', 'attempts', 'provider'), [
+    ([200], 1, 'nvidia'),
+    ([requests.ReadTimeout(), requests.ReadTimeout(), 200], 3, 'nvidia'),
+    ([503, 'truncated', 200], 3, 'nvidia'),
+    ([429, 504, 503], 3, 'extractive'),
+    ([401], 1, 'extractive'),
+    ([requests.exceptions.SSLError()], 1, 'extractive'),
+])
+def test_nvidia_summary_fallback(nim_settings, monkeypatch, results, attempts, provider):
+    key = 'fake-nvidia-fixture'
+    nim_settings.save_settings({'llm': {'provider': 'nvidia', 'nvidia_key': key,
+                                         'nvidia_model': 'nvidia/custom-chat-model'}})
+    calls = []
+
+    def post(url, **options):
+        calls.append(options)
+        result = results[len(calls) - 1]
+        if isinstance(result, Exception):
+            raise result
+        response = requests.Response()
+        response.status_code = 200 if result == 'truncated' else result
+        response._content = json.dumps({'choices': [{
+            'message': {'content': 'Resumo sintético'},
+            'finish_reason': 'length' if result == 'truncated' else 'stop',
+        }]}).encode()
+        return response
+
+    monkeypatch.setattr(requests, 'post', post)
+    summary, actual_provider = enhance.enhance(
+        {'notes_md': 'Notas sintéticas'}, [], templates.BUILTIN[0])
+    assert actual_provider == provider
+    if provider == 'nvidia':
+        assert summary == 'Resumo sintético'
+    assert [options['json']['model'] for options in calls] == [
+        'nvidia/nemotron-3.5-super-vl-120b-a12b',
+        'nvidia/nemotron-3-ultra-550b-a55b',
+        'z-ai/glm-5.3-flash',
+    ][:attempts]
+    assert all(options['headers']['Authorization'] == f'Bearer {key}' for options in calls)
+    assert all(options['json']['messages'] == calls[0]['json']['messages'] for options in calls)
 
 
 def test_nvidia_key_is_masked_and_can_be_edited_or_cleared(nim_settings):

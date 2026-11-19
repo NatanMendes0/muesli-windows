@@ -82,12 +82,13 @@ jobs:
             --hidden-import "webview.platforms.edgechromium" `
             launch.py
 
-      - name: Copy runtime config and package the local CPU and Vulkan engines
+      - name: Copy runtime config and package the local CPU, Vulkan and CUDA engines
         run: |
           $dir = Join-Path $PWD "dist\$env:MUESLI_DIST_NAME"
           Copy-Item Muesli.exe.config (Join-Path $dir "$env:MUESLI_DIST_NAME.exe.config")
           & .\scripts\install-minutes-runtime.ps1 -Destination (Join-Path $dir 'llama-runtime')
           & .\scripts\install-minutes-runtime.ps1 -Backend vulkan -Destination (Join-Path $dir 'llama-runtime-vulkan')
+          & .\scripts\install-minutes-runtime.ps1 -Backend cuda -Destination (Join-Path $dir 'llama-runtime-cuda')
 
       - name: Test build components
         run: |
@@ -114,6 +115,8 @@ jobs:
 
       - name: Verify the package can be staged and run without the original folder
         run: |
+          python -c "from pathlib import Path; import sys; from muesli.updater import MAX_ARCHIVE; assert Path(sys.argv[1]).stat().st_size <= MAX_ARCHIVE, 'O pacote excede o limite do atualizador.'" "$env:MUESLI_DIST_NAME.zip"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $stage = Join-Path $env:RUNNER_TEMP 'muesli-update-smoke'
           python -c "from pathlib import Path; import sys; from muesli.updater import extract_package; extract_package(Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3])" "$env:MUESLI_DIST_NAME.zip" $stage "v$env:MUESLI_VERSION"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -154,7 +157,8 @@ jobs:
           make_latest: true
           generate_release_notes: true
           body: |
-            - O selo ao lado de Muesli e a versão em Configurações → Atualizações agora exibem a versão do executável em execução, sem depender de um número fixo no HTML.
+            - Os resumos com NVIDIA NIM tentam Nemotron 3.5 Super VL, Nemotron 3 Ultra e GLM 5.3 Flash em sequência quando há falhas temporárias.
+            - Em Atas locais → Motor do Qwen local, a opção GPU dedicada NVIDIA (CUDA) acelera a geração de atas e volta à CPU se a GPU falhar.
             - A partir da v1.6.3, use Configurações → Atualizações para baixar e depois escolha Instalar e reiniciar. Na v1.6.2 ou anterior, baixe `${{ env.MUESLI_DIST_NAME }}.zip`, extraia a pasta inteira e abra `${{ env.MUESLI_DIST_NAME }}.exe`.
             - `Muesli-windows-x64.zip` contém o mesmo pacote e mantém a compatibilidade com atualizadores antigos.
         env:

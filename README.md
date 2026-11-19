@@ -149,12 +149,17 @@ selecione **Whisper local** na
 aba **Transcrição**. O chat continua com seu provedor separado. Se executar do
 código-fonte, prepare o motor com `.\scripts\install-minutes-runtime.ps1` no PowerShell.
 
-**GPU Intel (experimental):** em **Atas locais**, marque **Tentar GPU integrada Intel
-(Vulkan)** para testar com o driver instalado. Se o Muesli não detectar uma GPU Intel
-compatível ou a execução falhar, ele volta à CPU sem recorrer à nuvem. A notificação
-de conclusão informa o motor usado na etapa final. Compare com a opção desmarcada
-na mesma reunião e nas mesmas condições de energia. Para executar do código-fonte,
-prepare também o motor experimental com `.\scripts\install-minutes-runtime.ps1 -Backend vulkan`.
+Em **Atas locais → Motor do Qwen local**, escolha **CPU**, **GPU integrada Intel
+(Vulkan)** ou **GPU dedicada NVIDIA (CUDA)**. A opção CUDA usa o mesmo Qwen3 4B e
+ajusta quantas camadas vão para a GPU conforme a memória disponível. Para uma GTX 1650
+ou uma NVIDIA mais recente, use um driver atualizado que suporte CUDA 12.4. O pacote
+Windows inclui as bibliotecas do motor CUDA. Se a GPU escolhida estiver indisponível
+ou a execução falhar, o Muesli continua na CPU para o restante da ata. A notificação
+de conclusão informa o motor usado na etapa final.
+
+Para executar do código-fonte, prepare também o motor selecionado com
+`.\scripts\install-minutes-runtime.ps1 -Backend cuda` ou
+`.\scripts\install-minutes-runtime.ps1 -Backend vulkan`.
 
 ## Microfone e áudio do sistema no Windows
 
@@ -185,11 +190,15 @@ prepare também o motor experimental com `.\scripts\install-minutes-runtime.ps1 
   automaticamente; remova-a e o Muesli usará o Ollama e depois o resumidor integrado.
   As chaves são armazenadas apenas em `%APPDATA%\Muesli\settings.json` e enviadas
   somente ao provedor configurado.
-- **NVIDIA NIM (opcional, na nuvem)**: em **Configurações → Modelos de IA**, adicione a
-  chave no campo NVIDIA NIM e escolha um modelo de chat. Use **Testar conexão** para
-  validar com uma frase de exemplo, sem dados de reunião. Selecione explicitamente
-  **NVIDIA NIM (nuvem)** como provedor e salve. O chat e o aprimoramento normal enviam
-  o texto necessário à NVIDIA; a fila de **Atas locais** e a transcrição são independentes.
+- **NVIDIA NIM (opcional, na nuvem)**. Em **Configurações → Modelos de IA**, informe a
+  chave, selecione **NVIDIA NIM (nuvem)** como provedor e salve. Para usar o resumo na
+  nuvem ao clicar em **Aprimorar com IA**, deixe a geração de **Atas locais** desativada.
+  Se houver timeout, indisponibilidade ou uma resposta incompleta, o Muesli tenta o
+  próximo modelo, na ordem `nvidia/nemotron-3.5-super-vl-120b-a12b`,
+  `nvidia/nemotron-3-ultra-550b-a55b` e `z-ai/glm-5.3-flash`. Se a cadeia falhar, o
+  app usa o sumarizador integrado. O campo **Modelo NVIDIA NIM para chat** configura
+  o chat e a sugestão automática de título. **Testar conexão** usa esse modelo com
+  uma frase de exemplo. O resumo na nuvem e o chat enviam à NVIDIA o texto necessário.
 - **Transcrição na nuvem (opcional)**: altere Configurações > Transcrição para as APIs
   Whisper da OpenAI ou Groq. Se uma chamada à nuvem falhar durante a reunião, o Muesli
   volta ao Whisper local para que a transcrição continue.

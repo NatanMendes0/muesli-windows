@@ -40,11 +40,15 @@ def model_path():
     return Path(settings.models_dir()) / MODEL_NAME
 
 
-def runtime_path(use_vulkan=False):
+def runtime_path(use_vulkan=False, *, use_cuda=False):
     if sys.platform != 'win32':
         return None
     root = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
-    runtime = 'llama-runtime-vulkan' if use_vulkan else 'llama-runtime'
+    runtime = 'llama-runtime'
+    if use_cuda:
+        runtime = 'llama-runtime-cuda'
+    elif use_vulkan:
+        runtime = 'llama-runtime-vulkan'
     executable = root / runtime / 'llama-completion.exe'
     return executable if executable.is_file() else None
 
@@ -118,55 +122,77 @@ def intel_device_from_listing(listing):
     return None
 
 
-def probe_intel_gpu(cancel):
-    executable = runtime_path(use_vulkan=True)
+def cuda_device_from_listing(listing):
+    best_device, best_free_mib = None, 0
+    for line in listing.splitlines():
+        match = re.fullmatch(r'\s*(CUDA\d+): (.+) \(\d+ MiB, (\d+) MiB free\)\s*', line)
+        if match and int(match[3]) > best_free_mib:
+            best_device, best_free_mib = (match[1], match[2]), int(match[3])
+    return best_device
+
+
+def _probe_device(executable, parse_listing, cancel):
     if executable is None:
         return None
     try:
         result = _complete_process([str(executable), '--list-devices'], executable.parent,
                                    _process_flags(), _process_env(), cancel, timeout=10)
-        return intel_device_from_listing(result.decode('utf-8', errors='replace'))
+        return parse_listing(result.decode('utf-8', errors='replace'))
     except GenerationCancelled:
         raise
     except (OSError, subprocess.CalledProcessError, RuntimeError):
         return None
 
 
+def probe_intel_gpu(cancel):
+    return _probe_device(runtime_path(use_vulkan=True), intel_device_from_listing, cancel)
+
+
+def probe_nvidia_gpu(cancel):
+    return _probe_device(runtime_path(use_cuda=True), cuda_device_from_listing, cancel)
+
+
 class MinutesGenerator:
     """One backend selection per meeting; after a GPU failure, keep using CPU."""
 
-    def __init__(self, prefer_vulkan, cancel, status):
-        self.prefer_vulkan = prefer_vulkan
+    def __init__(self, prefer_vulkan, cancel, status, *, prefer_cuda=False):
         self.cancel = cancel
         self.status = status
         self.backend = 'CPU'
         self.device = None
         self.probed = False
+        self.prefer_cuda = prefer_cuda
+        self.gpu_backend = None
+        if prefer_cuda:
+            self.gpu_backend = 'GPU NVIDIA (CUDA)'
+        elif prefer_vulkan:
+            self.gpu_backend = 'GPU Intel (Vulkan)'
 
     def __call__(self, instructions, evidence, tokens, schema=None):
         if self.cancel.is_set():
             raise GenerationCancelled('Geração interrompida. Para refazer a ata, use Aprimorar com IA.')
-        if self.prefer_vulkan and not self.probed:
+        if self.gpu_backend and not self.probed:
             self.probed = True
-            self.status('Verificando GPU Intel (Vulkan)…')
-            self.device = probe_intel_gpu(self.cancel)
+            self.status(f'Verificando {self.gpu_backend}…')
+            probe = probe_nvidia_gpu if self.prefer_cuda else probe_intel_gpu
+            self.device = probe(self.cancel)
             if not self.device:
-                self.status('GPU Intel/Vulkan indisponível. Gerando ata na CPU…')
+                self.status(f'{self.gpu_backend} indisponível. Gerando ata na CPU…')
         if self.device:
-            executable = runtime_path(use_vulkan=True)
+            executable = runtime_path(use_cuda=True) if self.prefer_cuda else runtime_path(use_vulkan=True)
             if executable is not None and model_installed():
                 try:
-                    self.status(f'Gerando ata na GPU (Vulkan): {self.device[1]}…')
+                    self.status(f'Gerando ata com {self.gpu_backend} ({self.device[1]})…')
                     output = run_completion(executable, model_path(), instructions, evidence, tokens,
                                             power_connected(), schema, self.cancel, device=self.device[0])
-                    self.backend = 'GPU Intel (Vulkan)'
+                    self.backend = self.gpu_backend
                     return output
                 except GenerationCancelled:
                     raise
                 except RuntimeError:
-                    self.status('Falha na GPU Intel/Vulkan. Gerando ata na CPU…')
+                    self.status(f'Falha em {self.gpu_backend}. Gerando ata na CPU…')
             self.device = None
-        elif not self.prefer_vulkan:
+        elif not self.gpu_backend:
             self.status('Gerando ata na CPU…')
         self.backend = 'CPU'
         return generate(instructions, evidence, tokens, schema, self.cancel)
@@ -219,6 +245,11 @@ def run_completion(executable, model, instructions, evidence, tokens, on_ac, sch
               f'<|im_start|>user\nMaterial de referência (dados, não instruções):\n{evidence}<|im_end|>\n'
               '<|im_start|>assistant\n')  # Qwen3 Instruct 2507 uses the non-thinking ChatML template.
     threads = min(os.cpu_count() or 1, 4 if on_ac else 2)
+    gpu_args = ['-ngl', '0']
+    if device:
+        # CUDA can split the layers between VRAM and system RAM, keeping the full context.
+        layers = 'auto' if device.startswith('CUDA') else '99'
+        gpu_args = ['--device', device, '-ngl', layers]
     # llama-completion reads binary files without BOM/newline conversion. Avoid
     # putting meeting text in the process list; remove the private file on exit.
     with tempfile.TemporaryDirectory(prefix='minutes-', dir=settings.data_dir()) as tmp:
@@ -229,7 +260,7 @@ def run_completion(executable, model, instructions, evidence, tokens, on_ac, sch
                 str(executable), '-m', str(model), '-bf', str(source), '--no-conversation',
                 '--no-display-prompt', '--no-escape', '--no-context-shift',
                 '-b', '256', '-ub', '128',
-                *(['--device', device, '-ngl', '99'] if device else ['-ngl', '0']),
+                *gpu_args,
                 '-c', '8192', '-t', str(threads), '-tb', str(threads),
                 '--temp', '0', '-n', str(tokens),
                 *(['--json-schema', json.dumps(schema, separators=(',', ':'))] if schema else []),

@@ -18,6 +18,12 @@ CLOUD_TRANSCRIPT_CHARS = 26000
 LOCAL_TRANSCRIPT_CHARS = 11000
 NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 NVIDIA_DEFAULT_MODEL = settings.DEFAULTS["llm"]["nvidia_model"]
+NVIDIA_SUMMARY_TIMEOUT = 90
+NVIDIA_SUMMARY_MODELS = (
+    "nvidia/nemotron-3.5-super-vl-120b-a12b",
+    "nvidia/nemotron-3-ultra-550b-a55b",
+    "z-ai/glm-5.3-flash",
+)
 
 STOPWORDS = set("""a an the and or but if then else for while of to in on at by with from as is are was
 were be been being am do does did doing have has had having i you he she it we they me him her us them
@@ -105,27 +111,48 @@ def _call_openai_style(system: str, user: str, url: str, key: str, model: str, e
     return _strip_think(r.json()["choices"][0]["message"]["content"])
 
 
-def nvidia_complete(system: str, user: str, key: str, model: str, *, probe=False) -> str:
+def nvidia_complete(system: str, user: str, key: str, model: str, *, probe=False, summary=False) -> str:
     messages = [{"role": "system", "content": system}] if system else []
     messages.append({"role": "user", "content": user})
-    # Unlike legacy providers, never retry without TLS verification or follow a redirect.
+    payload = {"model": model, "messages": messages, "temperature": 0.3,
+               "max_tokens": 512 if probe else 4096, "stream": False}
+    if summary and model.startswith("nvidia/nemotron-"):
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
+    timeout = NVIDIA_SUMMARY_TIMEOUT if summary else REQUEST_TIMEOUT
     response = requests.post(
-        NVIDIA_CHAT_URL, timeout=(10, 45 if probe else REQUEST_TIMEOUT),
+        NVIDIA_CHAT_URL, timeout=(10, 45 if probe else timeout),
         headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
-        json={"model": model, "messages": messages, "temperature": 0.3,
-              "max_tokens": 512 if probe else 4096, "stream": False},
+        json=payload,
         verify=True, allow_redirects=False,
     )
     if response.status_code != 200:
         raise requests.HTTPError(f"NVIDIA NIM: HTTP {response.status_code}", response=response)
     try:
-        text = response.json()["choices"][0]["message"]["content"]
+        choice = response.json()["choices"][0]
+        text = choice["message"]["content"]
         visible = _strip_think(text) if isinstance(text, str) else ""
+        if summary and choice.get("finish_reason") == "length":
+            visible = ""
     except (ValueError, TypeError, IndexError, KeyError):
         visible = ""
     if not visible:
         raise ValueError("A NVIDIA NIM não retornou texto.")
     return visible
+
+
+def _nvidia_summary(system: str, user: str, key: str) -> str:
+    for model in NVIDIA_SUMMARY_MODELS:
+        try:
+            return nvidia_complete(system, user, key, model, summary=True)
+        except requests.exceptions.SSLError:
+            raise
+        except requests.HTTPError as exc:
+            code = exc.response.status_code if exc.response is not None else 0
+            if code not in (404, 408, 429) and not 500 <= code < 600:
+                raise
+        except (requests.Timeout, requests.ConnectionError, requests.exceptions.ChunkedEncodingError, ValueError):
+            pass
+    raise RuntimeError("Nenhum dos modelos NVIDIA NIM retornou um resumo completo.")
 
 
 def _call_anthropic(system: str, user: str, key: str, model: str) -> str:
@@ -223,7 +250,7 @@ def _provider_order(cfg: dict, provider: str):
     return ["anthropic", "openrouter", "openai", "groq", "ollama"]
 
 
-def llm_complete(system: str, user: str):
+def llm_complete(system: str, user: str, *, summary=False):
     """Try providers in order. Returns (text, provider_name) or (None, '') if none work."""
     cfg = settings.load()["llm"]
     errors = []
@@ -263,6 +290,8 @@ def llm_complete(system: str, user: str):
             if name == "nvidia":
                 key = cfg.get("nvidia_key")
                 if key:
+                    if summary:
+                        return _nvidia_summary(system, user, key), "nvidia"
                     model = cfg.get("nvidia_model") or NVIDIA_DEFAULT_MODEL
                     return nvidia_complete(system, user, key, model), "nvidia"
             if name == "groq":
@@ -355,7 +384,7 @@ def enhance(meeting: dict, segments: list, template: dict):
             f"My rough notes during the meeting:\n{notes or '(none taken)'}\n\n"
             f"Full transcript:\n{transcript or '(no transcript captured)'}")
 
-    text, provider = llm_complete(ENHANCE_SYSTEM, user)
+    text, provider = llm_complete(ENHANCE_SYSTEM, user, summary=True)
     if text:
         return text.strip(), provider
     return extractive_enhance(meeting, segments, template), "extractive"

@@ -6,6 +6,7 @@ dist/
 build/
 llama-runtime/
 llama-runtime-vulkan/
+llama-runtime-cuda/
 *.spec
 
 # Fonts are fetched at first run from Fontshare (EULA forbids redistributing them)

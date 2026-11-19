@@ -165,6 +165,42 @@ def test_vulkan_failure_retries_cpu_once_and_keeps_cpu_for_rest_of_meeting(monke
     assert any('Vulkan' in message and 'CPU' in message for message in messages)
 
 
+def test_cuda_detects_dedicated_gpu_and_falls_back_to_cpu_after_failure(monkeypatch, tmp_path):
+    cpu = tmp_path / 'llama-runtime' / 'llama-completion.exe'
+    cuda = tmp_path / 'llama-runtime-cuda' / 'llama-completion.exe'
+    monkeypatch.setattr(local_minutes, 'runtime_path', lambda *, use_cuda=False: cuda if use_cuda else cpu)
+    monkeypatch.setattr(local_minutes, 'model_installed', lambda: True)
+    monkeypatch.setattr(local_minutes, 'model_path', lambda: tmp_path / 'model.gguf')
+    monkeypatch.setattr(local_minutes, 'power_connected', lambda: False)
+    monkeypatch.setattr(settings, 'data_dir', lambda: str(tmp_path))
+    calls, messages = [], []
+
+    def process(command, cwd, flags, env, cancel, timeout=600):
+        calls.append(command)
+        if '--list-devices' in command:
+            assert command[0] == str(cuda)
+            return (b'Available devices:\n'
+                    b'  Vulkan0: Intel(R) UHD Graphics (4096 MiB, 4000 MiB free)\n'
+                    b'  CUDA0: NVIDIA GeForce GT 1030 (2048 MiB, 1024 MiB free)\n'
+                    b'  CUDA1: NVIDIA GeForce GTX 1650 (4096 MiB, 3584 MiB free)\n')
+        if len(calls) == 3:
+            raise local_minutes.GenerationTimeout()
+        return b'ok'
+
+    monkeypatch.setattr(local_minutes, '_complete_process', process)
+    generator = local_minutes.MinutesGenerator(False, threading.Event(), messages.append, prefer_cuda=True)
+    assert generator('Instruções', 'Fala 1', 10) == 'ok'
+    assert generator.backend == 'GPU NVIDIA (CUDA)'
+    gpu_args = calls[1]
+    assert gpu_args[gpu_args.index('--device'):gpu_args.index('--device') + 4] == [
+        '--device', 'CUDA1', '-ngl', 'auto']
+    assert generator('Instruções', 'Fala 2', 10) == 'ok'
+    assert generator('Instruções', 'Fala 3', 10) == 'ok'
+    assert [args[0] for args in calls] == [str(cuda), str(cuda), str(cuda), str(cpu), str(cpu)]
+    assert generator.backend == 'CPU'
+    assert any('CUDA' in message and 'CPU' in message for message in messages)
+
+
 def wait(backend, jid):
     deadline = time.monotonic() + 8
     while time.monotonic() < deadline:
