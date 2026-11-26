@@ -90,8 +90,9 @@
       <div class="note-header">
         <div class="title-row">
           <input id="noteTitle" placeholder="Reunião sem título" autocomplete="off" spellcheck="false">
-          <div class="rec-pill" id="recPill"><span class="dot"></span><span id="recTime">00:00</span></div>
-          <button class="btn-stop" id="btnStop">Parar</button>
+          <div class="rec-pill" id="recPill"><span class="dot" aria-hidden="true"></span><span id="recTime">00:00</span><span id="recPauseLabel" hidden>Em pausa</span></div>
+          <button type="button" class="btn-pause" id="btnPause">Pausar</button>
+          <button type="button" class="btn-stop" id="btnStop">Parar</button>
         </div>
         <div class="meta-row">
           <span id="noteMeta"></span>

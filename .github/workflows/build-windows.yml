@@ -59,7 +59,7 @@ jobs:
       - name: Run portable application tests
         run: |
           $env:APPDATA = Join-Path $env:RUNNER_TEMP 'muesli-portable-tests'
-          python -m pytest tests/test_local_minutes.py tests/test_minutes_pipeline.py tests/test_categories.py tests/test_privacy_settings.py tests/test_windows_release.py tests/test_update_install.py -q
+          python -m pytest tests/test_local_minutes.py tests/test_minutes_pipeline.py tests/test_categories.py tests/test_privacy_settings.py tests/test_recording_pause.py tests/test_windows_release.py tests/test_update_install.py -q
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:APPDATA = Join-Path $env:RUNNER_TEMP 'muesli-chat-test'
           python tests/test_chat.py
@@ -157,8 +157,8 @@ jobs:
           make_latest: true
           generate_release_notes: true
           body: |
-            - Os resumos com NVIDIA NIM tentam Nemotron 3.5 Super VL, Nemotron 3 Ultra e GLM 5.3 Flash em sequência quando há falhas temporárias.
-            - Em Atas locais → Motor do Qwen local, a opção GPU dedicada NVIDIA (CUDA) acelera a geração de atas e volta à CPU se a GPU falhar.
+            - Use **Pausar** durante a gravação para suspender a captura do microfone e do áudio do sistema e congelar o cronômetro.
+            - As notas e o áudio gravado ficam na mesma reunião. Você pode clicar em **Retomar** para continuar ou em **Parar** para finalizar durante a pausa.
             - A partir da v1.6.3, use Configurações → Atualizações para baixar e depois escolha Instalar e reiniciar. Na v1.6.2 ou anterior, baixe `${{ env.MUESLI_DIST_NAME }}.zip`, extraia a pasta inteira e abra `${{ env.MUESLI_DIST_NAME }}.exe`.
             - `Muesli-windows-x64.zip` contém o mesmo pacote e mantém a compatibilidade com atualizadores antigos.
         env:

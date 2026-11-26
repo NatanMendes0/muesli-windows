@@ -67,10 +67,13 @@ class Api:
     def get_state(self):
         s = settings.load()
         llm = enhance.llm_available()
+        sess = self._session
+        status = sess.status if sess else None
         return {
             "version": APP_VERSION,
-            "recording": bool(self._session and self._session.status == "recording"),
-            "active_meeting_id": self._session.meeting_id if self._session else None,
+            "recording": status in ("recording", "paused"),
+            "paused": status == "paused",
+            "active_meeting_id": sess.meeting_id if sess else None,
             "llm": llm,
             "stt_model": stt.model_status(),
             "audio_backend_ok": audio.PYAUDIO_OK,
@@ -107,6 +110,15 @@ class Api:
                 return {"ok": True, "meeting_id": meeting_id, "warnings": sess.capture.warnings}
             finally:
                 self._capture_requested = False
+
+    def set_recording_paused(self, meeting_id: int, paused: bool):
+        with self._start_lock:
+            sess = self._session
+            if not sess or sess.meeting_id != meeting_id:
+                return {"ok": False, "error": "Esta reunião não está sendo gravada."}
+            if self._stop_job:
+                return {"ok": False, "error": "A gravação está sendo finalizada."}
+        return sess.set_paused(paused)
 
     def stop_meeting(self):
         with self._start_lock:
@@ -153,9 +165,8 @@ class Api:
         return {"ok": True, "job_id": job_id}
 
     def poll_session(self, since: int):
-        if not self._session:
-            return {"status": "none"}
-        return self._session.poll(int(since or 0))
+        sess = self._session
+        return sess.poll(int(since or 0)) if sess else {"status": "none"}
 
     def list_meetings(self, search):
         return db.list_meetings(search or "")

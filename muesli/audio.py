@@ -7,7 +7,6 @@ plus a coarse energy timeline used to tag transcript segments as Me / Them.
 """
 import io
 import math
-import os
 import threading
 import time
 import wave
@@ -125,34 +124,41 @@ class _SourceReader(threading.Thread):
         self.rate = rate
         self.channels = channels
         self.stop_flag = threading.Event()
+        self.ready = threading.Event()
         self.error = ""
 
     def run(self):
-        p = pyaudio.PyAudio()
+        p = None
         stream = None
         frames = max(256, int(self.rate * 0.1))
         try:
+            p = pyaudio.PyAudio()
             stream = p.open(format=pyaudio.paInt16, channels=self.channels,
                             rate=self.rate, input=True, frames_per_buffer=frames,
                             input_device_index=self.device_index)
+            self.ready.set()
             while not self.stop_flag.is_set():
                 raw = stream.read(frames, exception_on_overflow=False)
+                if self.stop_flag.is_set():
+                    break
                 pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
                 if self.channels > 1:
                     pcm = pcm.reshape(-1, self.channels).mean(axis=1)
                 pcm16k = _resample_mono(pcm, self.rate)
-                self.session._push(self.key, pcm16k)
+                self.session._push(self, pcm16k)
         except Exception as e:
             self.error = str(e)
             self.session._source_failed(self.key, str(e))
         finally:
+            self.ready.set()
             try:
                 if stream is not None:
                     stream.stop_stream()
                     stream.close()
             except OSError:
                 pass
-            p.terminate()
+            if p is not None:
+                p.terminate()
 
 
 class CaptureSession:
@@ -162,13 +168,14 @@ class CaptureSession:
         self.lock = threading.Lock()
         self.buffers = {"mic": np.zeros(0, dtype=np.float32),
                         "loop": np.zeros(0, dtype=np.float32)}
-        self.totals = {"mic": 0, "loop": 0}      # total samples ever pushed
+        self.totals = {"mic": 0, "loop": 0}      # end of each source on the mixed sample timeline
         self.energy = {"mic": [], "loop": []}    # rms per ENERGY_HOP bucket
         self._energy_accum = {"mic": [0.0, 0], "loop": [0.0, 0]}  # sumsq, count
         self.consumed = 0                        # samples handed to the mixer
         self.readers = {}
         self.warnings = []
-        self.started_at = None
+        self._running_since = None
+        self._recorded_elapsed = 0.0
         self.active = False
         self.mic_index = mic_index
         self.loopback_index = loopback_index
@@ -182,6 +189,38 @@ class CaptureSession:
         self.stalled = {"mic": False, "loop": False}
 
     def start(self):
+        self.resume()
+        try:
+            if self.retain_path:
+                self._wav = wave.open(self.retain_path, "wb")
+                self._wav.setnchannels(1)
+                self._wav.setsampwidth(2)
+                self._wav.setframerate(TARGET_RATE)
+        except Exception:
+            self.stop()
+            self.finalize_wav()
+            raise
+
+    def resume(self):
+        if self.active:
+            return
+        if any(r.is_alive() for r in self.readers.values()) or (self._keeper and self._keeper.is_alive()):
+            raise RuntimeError("Aguarde os dispositivos de áudio serem liberados e tente novamente.")
+        try:
+            self._start_readers()
+            with self.lock:
+                self._align_sources()
+                now = time.monotonic()
+                self.last_push = dict.fromkeys(self.readers, now)
+                self.stalled = dict.fromkeys(self.readers, False)
+                self._keeper_restarts = 0
+                self._running_since = now
+                self.active = True
+        except Exception:
+            self._stop_readers()
+            raise
+
+    def _start_readers(self):
         if not PYAUDIO_OK:
             raise RuntimeError("PyAudioWPatch not available: " + PYAUDIO_ERR)
         p = pyaudio.PyAudio()
@@ -208,36 +247,53 @@ class CaptureSession:
         if mic_info is None and loop_info is None:
             raise RuntimeError("No usable audio devices (mic and loopback both missing).")
 
-        self.started_at = time.time()
-        self.active = True
+        self.readers = {}
         if loop_info is not None:
             # Must be running before the loopback stream opens; see _SilenceKeeper.
             self._keeper = _SilenceKeeper()
             self._keeper.start()
             time.sleep(0.4)
-        if mic_info is not None:
-            r = _SourceReader(self, "mic", int(mic_info["index"]),
-                              int(mic_info["defaultSampleRate"]),
-                              max(1, min(2, int(mic_info["maxInputChannels"]))))
-            self.readers["mic"] = r
-            r.start()
-        if loop_info is not None:
-            r = _SourceReader(self, "loop", int(loop_info["index"]),
-                              int(loop_info["defaultSampleRate"]),
-                              max(1, min(2, int(loop_info["maxInputChannels"]))))
-            self.readers["loop"] = r
-            r.start()
-        now = time.time()
-        self.last_push = {"mic": now, "loop": now}
-        if self.retain_path:
-            self._wav = wave.open(self.retain_path, "wb")
-            self._wav.setnchannels(1)
-            self._wav.setsampwidth(2)
-            self._wav.setframerate(TARGET_RATE)
+        for key, info in (("mic", mic_info), ("loop", loop_info)):
+            if info is None:
+                continue
+            reader = _SourceReader(self, key, int(info["index"]), int(info["defaultSampleRate"]),
+                                   max(1, min(2, int(info["maxInputChannels"]))))
+            self.readers[key] = reader
+            reader.start()
 
-    def _push(self, key: str, pcm16k: np.ndarray):
+        deadline = time.monotonic() + 2.0
+        for reader in self.readers.values():
+            if not reader.ready.wait(max(0, deadline - time.monotonic())):
+                reader.stop_flag.set()
+                self._source_failed(reader.key, "timed out opening the device")
+        if not any(r.is_alive() and not r.error and not r.stop_flag.is_set() for r in self.readers.values()):
+            raise RuntimeError("Nenhum dispositivo de áudio pôde ser aberto.")
+
+    def _align_sources(self):
+        # A stalled or faster source can leave different sample counts at the pause.
+        # Both new streams must start at the end of the previous mix.
+        end = max(self.totals.values())
+        hop = int(TARGET_RATE * ENERGY_HOP)
+        for key, total in self.totals.items():
+            if total == end:
+                continue
+            self.buffers[key] = np.concatenate([
+                self.buffers[key], np.zeros(end - max(total, self.consumed), dtype=np.float32)])
+            self.totals[key] = end
+            acc = self._energy_accum[key]
+            buckets, remainder = divmod(acc[1] + end - total, hop)
+            if buckets:
+                self.energy[key].append((acc[0] / hop) ** 0.5)
+                self.energy[key].extend([0.0] * (buckets - 1))
+                acc[0] = 0.0
+            acc[1] = remainder
+
+    def _push(self, reader: _SourceReader, pcm16k: np.ndarray):
         with self.lock:
-            self.last_push[key] = time.time()
+            key = reader.key
+            if not self.active or self.readers.get(key) is not reader or reader.stop_flag.is_set():
+                return
+            self.last_push[key] = time.monotonic()
             self.buffers[key] = np.concatenate([self.buffers[key], pcm16k])
             self.totals[key] += pcm16k.size
             # Energy timeline in ENERGY_HOP buckets for speaker tagging.
@@ -267,7 +323,7 @@ class CaptureSession:
         otherwise a stuck loopback stream silently freezes transcription.
         """
         r = self.readers.get(key)
-        if r is None or r.error or not r.is_alive():
+        if r is None or r.error or r.stop_flag.is_set() or not r.is_alive():
             return False
         if self.stalled[key]:
             return False
@@ -286,20 +342,19 @@ class CaptureSession:
         if self._keeper_restarts >= 3:
             return
         self._keeper_restarts += 1
-        with self.lock:
-            self.warnings.append(
-                "Output device hiccup ({}); restarting loopback keeper (attempt {}).".format(
-                    self._keeper.error or "stopped", self._keeper_restarts))
+        self.warnings.append(
+            "Output device hiccup ({}); restarting loopback keeper (attempt {}).".format(
+                self._keeper.error or "stopped", self._keeper_restarts))
         self._keeper = _SilenceKeeper()
         self._keeper.start()
 
     def pull_mixed(self) -> np.ndarray:
         """Return newly available mixed 16 kHz mono audio since the last call."""
-        self._check_keeper()
-        now = time.time()
         with self.lock:
-            gating = [self.totals[k] for k in ("mic", "loop") if self._gates(k, now)]
-            avail = min(gating) if gating else max(self.totals.values() or [0])
+            self._check_keeper()
+            now = time.monotonic()
+            gating = [self.totals[k] for k in self.readers if self._gates(k, now)] if self.active else []
+            avail = min(gating) if gating else max(self.totals.values())
             n = avail - self.consumed
             if n <= 0:
                 return np.zeros(0, dtype=np.float32)
@@ -343,22 +398,37 @@ class CaptureSession:
             return "Them"
         return ""
 
-    def stop(self):
-        self.active = False
+    def pause(self):
+        with self.lock:
+            if self.active:
+                self._recorded_elapsed += time.monotonic() - self._running_since
+                self._running_since = None
+                self.active = False
+                self.levels = {"mic": 0.0, "loop": 0.0}
+        self._stop_readers()
+
+    def _stop_readers(self):
         # A blocked loopback read only returns while the render device is active,
         # so make sure the keeper is running before joining the readers.
-        if (self._keeper is not None and not self._keeper.is_alive()
-                and any(r.is_alive() for r in self.readers.values())):
+        loop_reader = self.readers.get("loop")
+        if loop_reader and loop_reader.is_alive() and (self._keeper is None or not self._keeper.is_alive()):
             self._keeper = _SilenceKeeper()
             self._keeper.start()
         for r in self.readers.values():
             r.stop_flag.set()
         for r in self.readers.values():
-            r.join(timeout=2.0)
-        if self._keeper is not None:
+            if r.is_alive():
+                r.join(timeout=2.0)
+            if r.is_alive():
+                self._source_failed(r.key, "timed out closing the device")
+        if self._keeper is not None and self._keeper.is_alive():
             self._keeper.stop_flag.set()
             self._keeper.join(timeout=2.0)
+        if self._keeper is not None and not self._keeper.is_alive():
             self._keeper = None
+
+    def stop(self):
+        self.pause()
         # The WAV stays open: the transcriber's final drain still writes to it.
         # session.stop() calls finalize_wav() once the drain is done.
 
@@ -372,7 +442,10 @@ class CaptureSession:
                 self._wav = None
 
     def elapsed(self) -> float:
-        return (time.time() - self.started_at) if self.started_at else 0.0
+        with self.lock:
+            if self._running_since is None:
+                return self._recorded_elapsed
+            return self._recorded_elapsed + time.monotonic() - self._running_since
 
 
 def wav_bytes(pcm: np.ndarray, rate: int = TARGET_RATE) -> bytes:

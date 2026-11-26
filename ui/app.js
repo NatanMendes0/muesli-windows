@@ -8,6 +8,7 @@ const state = {
   categories: [],
   current: null,        // full meeting object currently open
   recording: false,
+  paused: false,
   activeMeetingId: null,
   segCount: 0,          // segments received for the live session
   renderedSegIds: new Set(),
@@ -218,7 +219,8 @@ async function refreshMeetings() {
         const btn = document.createElement("button");
         btn.className = "meeting-item" + (state.current && state.current.id === m.id ? " active" : "");
         const live = m.id === state.activeMeetingId && state.recording;
-        btn.innerHTML = `<div class="title"></div><div class="meta">${live ? '<span class="live">● recording</span>' : ""}<span>${fmtDate(m.created_at)}</span><span>${fmtDur(m.duration_sec)}</span></div>`;
+        const badge = live ? `<span class="live${state.paused ? " paused" : ""}">● ${state.paused ? "Em pausa" : "Gravando"}</span>` : "";
+        btn.innerHTML = `<div class="title"></div><div class="meta">${badge}<span>${fmtDate(m.created_at)}</span><span>${fmtDur(m.duration_sec)}</span></div>`;
         btn.querySelector(".title").textContent = m.title;
         btn.setAttribute("aria-haspopup", "menu");
         btn.addEventListener("click", () => openMeeting(m.id));
@@ -386,15 +388,24 @@ async function openMeeting(id) {
 }
 
 function setRecordingUi(on) {
-  // Pill, stop button and meters belong to the meeting view being shown;
-  // the sidebar button reflects the global recording state.
+  const pausedHere = on && state.paused;
   $("recPill").classList.toggle("visible", on);
+  $("recPill").classList.toggle("paused", pausedHere);
+  $("recPauseLabel").hidden = !pausedHere;
+  $("btnPause").classList.toggle("visible", on);
+  $("btnPause").textContent = pausedHere ? "Retomar" : "Pausar";
   $("btnStop").classList.toggle("visible", on);
-  $("meters").style.display = on ? "flex" : "none";
-  $("btnNewLabel").textContent = state.recording ? "Gravando…" : "Nova reunião";
+  $("meters").style.display = on && !pausedHere ? "flex" : "none";
+  $("btnNewLabel").textContent = state.recording ? (state.paused ? "Em pausa" : "Gravando…") : "Nova reunião";
   $("btnNew").classList.toggle("recording", state.recording);
+  $("btnNew").classList.toggle("paused", state.recording && state.paused);
   document.body.classList.toggle("is-recording", !!state.recording);
-  if (!on && $("trBatchBar")) $("trBatchBar").style.display = "none";
+  if ((!on || pausedHere) && $("trBatchBar")) $("trBatchBar").style.display = "none";
+  const transcriptStatus = $("trStatus");
+  if (on && transcriptStatus) {
+    if (pausedHere) transcriptStatus.textContent = "Gravação em pausa.";
+    else if (transcriptStatus.textContent === "Gravação em pausa.") transcriptStatus.textContent = "";
+  }
   const cb = $("consentBanner");
   if (state.recording) {
     const s = state.settings || {};
@@ -569,7 +580,7 @@ function addSegmentEl(s) {
   if (nearBottom) body.scrollTop = body.scrollHeight;
 }
 
-/* ------------------------------------------------------ record / stop */
+/* -------------------------------------------------- recording controls */
 async function startNewNote(categoryId = null) {
   if (state.recording) {
     if (state.activeMeetingId) openMeeting(state.activeMeetingId);
@@ -593,8 +604,10 @@ async function startNewNote(categoryId = null) {
       return;
     }
     state.recording = true;
+    state.paused = false;
     state.activeMeetingId = res.meeting_id;
     state.segCount = 0;
+    updateRecordingClock(0);
     if (categoryId === null) {
       $("searchInput").value = "";
       try {
@@ -625,27 +638,51 @@ function showWarn(msg) {
   b.classList.add("visible");
 }
 
+function updateRecordingClock(elapsed) {
+  const seconds = Math.floor(elapsed || 0);
+  $("recTime").textContent =
+    String(Math.floor(seconds / 60)).padStart(2, "0") + ":" + String(seconds % 60).padStart(2, "0");
+}
+
 function startPolling() {
   stopPolling();
-  state.pollTimer = setInterval(async () => {
+  let polling = false;
+  const timer = state.pollTimer = setInterval(async () => {
     if (!state.recording) return stopPolling();
+    if (polling) return;
+    polling = true;
     let s;
     try { s = await api().poll_session(state.segCount); }
     catch (e) { return; }
-    if (s.status === "none") { state.recording = false; setRecordingUi(false); refreshMeetings(); return stopPolling(); }
+    finally { polling = false; }
+    if (state.pollTimer !== timer) return;
+    if (s.status === "none") {
+      if ($("btnStop").disabled) return; // let the current recording command settle
+      state.recording = state.paused = false;
+      state.activeMeetingId = null;
+      setRecordingUi(false);
+      refreshMeetings();
+      return stopPolling();
+    }
     // Live widgets only when the live meeting is the one on screen.
-    const viewingLive = state.current && state.current.id === state.activeMeetingId;
+    const viewingLive = state.current?.id === state.activeMeetingId;
+    if ((s.status === "paused" || s.status === "recording") && state.paused !== (s.status === "paused")) {
+      state.paused = s.status === "paused";
+      setRecordingUi(viewingLive);
+      refreshMeetings();
+    }
+    updateRecordingClock(s.elapsed);
     if (viewingLive) {
-      const el = Math.floor(s.elapsed || 0);
-      $("recTime").textContent =
-        String(Math.floor(el / 60)).padStart(2, "0") + ":" + String(el % 60).padStart(2, "0");
       // meters (rms 0..~0.3 mapped to 0..1 via scaleX to avoid layout reflow)
       $("meterMic").style.transform = `scaleX(${Math.min(1, (s.levels.mic || 0) * 4)})`;
       $("meterLoop").style.transform = `scaleX(${Math.min(1, (s.levels.loop || 0) * 4)})`;
       const tr = $("trStatus");
       const bb = $("trBatchBar");
       if (tr) {
-        if (s.model && s.model.state === "loading") {
+        if (state.paused) {
+          tr.textContent = "Gravação em pausa.";
+          if (bb) bb.style.display = "none";
+        } else if (s.model && s.model.state === "loading") {
           tr.textContent = s.model.detail + "…";
           if (bb) bb.style.display = "none";
         } else if (s.detail) {
@@ -676,22 +713,56 @@ function stopPolling() {
   state.pollTimer = null;
 }
 
+async function toggleRecordingPause() {
+  const pauseButton = $("btnPause");
+  const stopButton = $("btnStop");
+  const meetingId = state.activeMeetingId;
+  if (!state.recording || state.current?.id !== meetingId || pauseButton.disabled) return;
+  pauseButton.disabled = stopButton.disabled = true;
+  const paused = !state.paused;
+  const fallback = paused ? "Não foi possível pausar a gravação." : "Não foi possível retomar a gravação.";
+  try {
+    const result = await api().set_recording_paused(meetingId, paused);
+    if (!result.ok) return toast(result.error || fallback);
+    if (!state.recording || state.activeMeetingId !== meetingId) return;
+    state.paused = result.status === "paused";
+    updateRecordingClock(result.elapsed);
+    for (const id of ["meterMic", "meterLoop"]) $(id).style.transform = "scaleX(0)";
+    setRecordingUi(state.current?.id === meetingId);
+    startPolling();
+    refreshMeetings().catch(() => {});
+  } catch (err) {
+    toast(fallback);
+  } finally {
+    pauseButton.disabled = stopButton.disabled = false;
+  }
+}
+
 async function stopRecording() {
-  if (!state.recording) return;
+  if (!state.recording || $("btnStop").disabled) return;
   const stoppedId = state.activeMeetingId;
   $("btnStop").textContent = "Finalizando…";
   $("btnStop").disabled = true;
-  if (state.current?.id === stoppedId) await flushNotes();
-  const res = await api().stop_meeting();
-  const capture = res.ok ? await waitJob(res.job_id) : null;
-  state.recording = false;
+  $("btnPause").disabled = true;
+  let capture;
+  try {
+    if (state.current?.id === stoppedId) await flushNotes();
+    const res = await api().stop_meeting();
+    if (!res.ok) return toast(res.error || "Não foi possível parar a gravação.");
+    capture = await waitJob(res.job_id);
+  } catch (err) {
+    return toast("Não foi possível parar a gravação.");
+  } finally {
+    $("btnStop").textContent = "Parar";
+    $("btnStop").disabled = false;
+    $("btnPause").disabled = false;
+  }
+  state.recording = state.paused = false;
   state.activeMeetingId = null;
   stopPolling();
-  $("btnStop").textContent = "Parar";
-  $("btnStop").disabled = false;
   setRecordingUi(false);
   refreshMeetings();
-  if (!capture) { if (!res.ok) toast(res.error); return; }
+  if (!capture) return;
   const stopped = await waitJob(capture.finalize_job_id);
   if (!stopped) return;
   if (stopped.minutes_job_id) watchMinutesJob(stoppedId, stopped.minutes_job_id);
@@ -1467,6 +1538,7 @@ async function refreshStatus() {
     // resume live session state after a UI reload
     if (st.recording && !state.recording) {
       state.recording = true;
+      state.paused = !!st.paused;
       state.activeMeetingId = st.active_meeting_id;
       state.segCount = 0; // renderedSegIds dedup absorbs the replayed backlog
       startPolling();
@@ -1482,6 +1554,7 @@ function wireEvents() {
   $("btnNew").addEventListener("click", () => startNewNote(null));
   $("btnNewHome").addEventListener("click", () => startNewNote(null));
   wireMeetingMenu();
+  $("btnPause").addEventListener("click", toggleRecordingPause);
   $("btnStop").addEventListener("click", stopRecording);
   $("btnEnhance").addEventListener("click", enhanceNow);
   $("btnClearMinutesQueue").addEventListener("click", clearMinutesQueue);

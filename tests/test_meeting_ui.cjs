@@ -91,6 +91,91 @@ test('o botão + de uma categoria mantém a categoria escolhida', async t => {
   assert.match(card('Nova reunião').closest('section').querySelector('.category-toggle').textContent, /Projetos/);
 });
 
+test('Pausar e Retomar preservam a reunião e ignoram respostas antigas do cronômetro', async t => {
+  const {w, $, card, calls, api} = setup(t);
+  let activePoll;
+  let pollId = 0;
+  w.setInterval = callback => { activePoll = callback; return ++pollId; };
+  let resolveOldPoll;
+  api.poll_session = () => new Promise(resolve => { resolveOldPoll = resolve; });
+  let canResume = false;
+  api.set_recording_paused = async (meetingId, paused) => {
+    calls.push(['setPaused', meetingId, paused]);
+    if (!paused && !canResume) return {ok: false, error: 'Microfone indisponível'};
+    return {ok: true, status: paused ? 'paused' : 'recording', elapsed: 65};
+  };
+
+  $('btnNewHome').click();
+  await tick();
+  assert.ok($('btnPause').classList.contains('visible'));
+  assert.equal($('btnPause').textContent, 'Pausar');
+  const oldPoll = activePoll();
+  $('btnPause').click();
+  assert.ok($('btnPause').disabled && $('btnStop').disabled);
+  await tick();
+  assert.equal($('btnPause').textContent, 'Retomar');
+  assert.equal($('recPauseLabel').hidden, false);
+  assert.equal($('recTime').textContent, '01:05');
+  assert.equal($('meters').style.display, 'none');
+  assert.equal($('trStatus').textContent, 'Gravação em pausa.');
+  assert.match(card('Nova reunião').querySelector('.live').textContent, /Em pausa/);
+  resolveOldPoll({status: 'recording', elapsed: 99, levels: {}, segments: [], total: 0});
+  await oldPoll;
+  assert.equal($('recTime').textContent, '01:05');
+  assert.equal($('btnPause').textContent, 'Retomar');
+
+  await w.ui.openMeeting(10);
+  assert.equal($('btnPause').classList.contains('visible'), false);
+  $('btnNew').click();
+  await tick();
+  assert.equal(w.ui.state.current.id, 30);
+  assert.equal($('btnPause').textContent, 'Retomar');
+  $('btnPause').click();
+  await tick();
+  assert.equal($('btnPause').textContent, 'Retomar');
+  assert.match($('toast').textContent, /Microfone indisponível/);
+  canResume = true;
+  $('btnPause').click();
+  await tick();
+  assert.equal($('btnPause').textContent, 'Pausar');
+  assert.equal($('recPauseLabel').hidden, true);
+  assert.equal($('meters').style.display, 'flex');
+  assert.equal($('recTime').textContent, '01:05');
+  assert.equal(w.ui.state.current.id, 30);
+  assert.deepEqual(calls, [['start', null], ['setPaused', 30, true], ['setPaused', 30, false], ['setPaused', 30, false]]);
+});
+
+test('a interface restaura uma reunião pausada e permite finalizá-la', async t => {
+  const {w, $, calls, api} = setup(t);
+  const jobs = new Map();
+  let intervalId = 0;
+  w.setInterval = callback => { jobs.set(++intervalId, callback); return intervalId; };
+  w.clearInterval = id => jobs.delete(id);
+  api.get_state = async () => ({llm: {}, stt_model: {}, recording: true, paused: true, active_meeting_id: 10});
+  api.poll_session = async () => ({status: 'none'});
+  api.stop_meeting = async () => { calls.push(['stop']); return {ok: true, job_id: 'stop'}; };
+  api.job_status = async id => ({state: 'done', result: id === 'stop' ? {finalize_job_id: 'finalize'} : {local_minutes: true}});
+
+  await w.ui.refreshStatus();
+  await w.ui.openMeeting(10);
+  assert.equal($('btnPause').textContent, 'Retomar');
+  assert.ok($('btnStop').classList.contains('visible'));
+  $('btnStop').click();
+  await tick();
+  assert.ok($('btnPause').disabled);
+  await jobs.get(1)();
+  assert.equal(w.ui.state.activeMeetingId, 10);
+  await jobs.get(intervalId)();
+  await tick();
+  await jobs.get(intervalId)();
+  await tick();
+  assert.equal(w.ui.state.recording, false);
+  assert.equal(w.ui.state.paused, false);
+  assert.equal($('btnPause').classList.contains('visible'), false);
+  assert.equal($('btnStop').classList.contains('visible'), false);
+  assert.deepEqual(calls, [['stop']]);
+});
+
 test('menu usa o ID do card clicado sem trocar a reunião aberta', async t => {
   const {w, $, card, calls} = setup(t);
   await w.ui.openMeeting(10);

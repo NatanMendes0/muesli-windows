@@ -9,10 +9,10 @@ class MeetingSession:
     def __init__(self, meeting_id: int):
         self.meeting_id = meeting_id
         self.lock = threading.Lock()
-        self._stop_lock = threading.Lock()
+        self._capture_lock = threading.Lock()
         self._stopped_duration = None
         self.segments = []          # dicts, in arrival order
-        self.status = "starting"    # starting | recording | stopping | stopped | error
+        self.status = "starting"    # starting | recording | paused | stopping | stopped | error
         self.status_detail = ""
         self.error = ""
         cfg = settings.load()["audio"]
@@ -37,6 +37,21 @@ class MeetingSession:
             self.capture, self._on_segment, self._on_status)
         self.transcriber.start()
         self.status = "recording"
+
+    def set_paused(self, paused: bool):
+        with self._capture_lock:
+            if self.status not in ("recording", "paused"):
+                return {"ok": False, "error": "A gravação está sendo finalizada."}
+            if paused and self.status == "recording":
+                self.capture.pause()
+                self.status = "paused"
+            elif not paused and self.status == "paused":
+                try:
+                    self.capture.resume()
+                except Exception as e:
+                    return {"ok": False, "error": f"Não foi possível retomar a gravação: {e}"}
+                self.status = "recording"
+            return {"ok": True, "status": self.status, "elapsed": self.capture.elapsed()}
 
     def _on_segment(self, t0, t1, speaker, text):
         seg_id = db.add_segment(self.meeting_id, t0, t1, speaker, text)
@@ -64,12 +79,12 @@ class MeetingSession:
     def stop(self) -> float:
         """Idempotent and thread safe: tray quit, Stop button and window close
         can all race into this."""
-        with self._stop_lock:
+        with self._capture_lock:
             if self._stopped_duration is not None:
                 return self._stopped_duration
             self.status = "stopping"
-            duration = self.capture.elapsed()
             self.capture.stop()
+            duration = self.capture.elapsed()
             if self.transcriber is not None:
                 self.transcriber.stop()   # drains remaining audio, blocks until done
             self.capture.finalize_wav()
